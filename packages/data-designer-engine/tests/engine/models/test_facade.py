@@ -260,11 +260,13 @@ _ANTHROPIC_TEXT_RESPONSE = {
             AnthropicClient,
             _ANTHROPIC_TEXT_RESPONSE,
             None,
-            {"top_k": 40},
+            # The adapter excludes presence_penalty; min_p and repetition_penalty are not
+            # Messages API parameters but reach the body like any other extra_body key.
+            {"top_k": 40, "min_p": 0.05, "repetition_penalty": 1.1},
             {"presence_penalty", "extra_body"},
         ),
     ],
-    ids=["openai-compatible", "provider-extra-body-wins", "anthropic-drops-presence-penalty"],
+    ids=["openai-compatible", "provider-extra-body-wins", "anthropic-forwards-extra-body-minus-presence-penalty"],
 )
 def test_generate_sends_sampling_params_in_body(
     stub_model_configs: list[Any],

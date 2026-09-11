@@ -37,7 +37,7 @@ If `temperature`, `top_p`, `max_tokens`, or any of the sampling parameters above
 Provider Support for Sampling Parameters
 `top_k`, `min_p`, and `repetition_penalty` are not [OpenAI Chat Completions](https://platform.openai.com/docs/api-reference/chat/create) parameters, so they are merged into the request body through `extra_body`, and the endpoint must accept them. [vLLM](https://github.com/vllm-project/vllm/blob/main/vllm/sampling_params.py) and [SGLang](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/sampling/sampling_params.py) accept all three; SGLang also caps `repetition_penalty` at 2.0. Keys you set in `extra_body` yourself override these fields, and a model provider's `extra_body` overrides both.
 
-For Anthropic providers, `presence_penalty` is not sent. The [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) supports `top_k` but has no `min_p` or `repetition_penalty`, so leave those two unset.
+For Anthropic providers, `presence_penalty` is not sent, because the Anthropic adapter excludes it. The [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) supports `top_k` but has no `min_p` or `repetition_penalty`, and the adapter does not filter those two: if you set them they are still merged into the request body, and the API rejects the request. Leave them unset for Anthropic, as you would for any key in `extra_body` that the endpoint does not accept.
 </Note>
 
 <Tip>
