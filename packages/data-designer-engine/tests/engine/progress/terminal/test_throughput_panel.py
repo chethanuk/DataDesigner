@@ -3,23 +3,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
 import re
 import shutil
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from unittest.mock import patch
 
 import pytest
 from wcwidth import wcswidth
 
+from data_designer.engine.models.clients.errors import ProviderError, ProviderErrorKind
+from data_designer.engine.models.clients.model_request_executor import ModelRequestExecutor
+from data_designer.engine.models.clients.retry import RetryConfig
+from data_designer.engine.models.clients.types import AssistantMessage, ChatCompletionRequest, ChatCompletionResponse
+from data_designer.engine.models.request_admission.controller import AdaptiveRequestAdmissionController
 from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
 from data_designer.engine.observability import (
     RequestAdmissionEvent,
     RuntimeCorrelation,
     emit_request_admission_event,
+    runtime_correlation_provider,
 )
 from data_designer.engine.progress.reporter import AsyncProgressReporter
 from data_designer.engine.progress.terminal.throughput_panel import (
@@ -677,3 +685,305 @@ def test_reporter_filters_global_events_by_run_id(tty_stream: FakeTTY) -> None:
             assert len(bar._feedback_markers) == 1  # noqa: SLF001
         finally:
             reporter.close()
+
+
+_REQUEST_WAIT_LINE_RE = re.compile(
+    r"(column '[^']*'): models=(\S+), request_wait_wall_time_s=([\d.]+), idle_time_s=([\d.]+), "
+    r"idle_pct_of_run=([\d.]+)%, requests=(\d+)"
+)
+
+
+def _wait_correlation(column: str = "prompt", run_id: str = "run-a") -> RuntimeCorrelation:
+    return RuntimeCorrelation(
+        run_id=run_id,
+        row_group=0,
+        task_column=column,
+        task_type="cell",
+        scheduling_group_kind="model",
+        scheduling_group_identity_hash="hash",
+        task_execution_id="task-exec",
+    )
+
+
+def _lease_event(
+    kind: str,
+    at: float,
+    lease: str,
+    correlation: RuntimeCorrelation | None,
+    model_id: str = "nemotron",
+) -> RequestAdmissionEvent:
+    # Built directly because capture() stamps "now"; __post_init__ turns the correlation into a dict as in production.
+    return RequestAdmissionEvent(
+        event_kind=kind,
+        captured_at_monotonic=at,
+        sequence=0,
+        captured_correlation=correlation,
+        request_lease_id=lease,
+        request_resource_key={"provider_name": "nvidia", "model_id": model_id, "domain": "chat"},
+    )
+
+
+def _wait_lines(caplog: pytest.LogCaptureFixture) -> dict[str, tuple[str, float, float, float, int]]:
+    lines = {}
+    for record in caplog.records:
+        if match := _REQUEST_WAIT_LINE_RE.search(record.getMessage()):
+            label, models, wait, idle, pct, requests = match.groups()
+            lines[label] = (models, float(wait), float(idle), float(pct), int(requests))
+    return lines
+
+
+def _assert_wait_lines(
+    caplog: pytest.LogCaptureFixture, expected: dict[str, tuple[str, float, float, float, int]]
+) -> None:
+    # Wait comes from event timestamps and is exact; idle and pct also depend on when log_final runs.
+    got = _wait_lines(caplog)
+    assert got.keys() == expected.keys()
+    for label, (models, wait, idle, pct, requests) in expected.items():
+        assert got[label] == (models, wait, pytest.approx(idle, abs=0.5), pytest.approx(pct, abs=2.5), requests)
+
+
+def _wait_reporter() -> AsyncProgressReporter:
+    trackers = {
+        column: ProgressTracker(total_records=1, label=f"column '{column}'", quiet=True)
+        for column in ("prompt", "label", "expr")
+    }
+    return AsyncProgressReporter(trackers, run_id="run-a")
+
+
+# (lease, column, model, acquired_s, released_s) relative to a 20 s run -> {label: (models, wait, idle, pct, requests)}
+_WAIT_CASES = {
+    "overlap": (
+        [("a", "prompt", "nemotron", 0, 10), ("b", "prompt", "nemotron", 5, 15)],
+        {"column 'prompt'": ("nemotron", 15.0, 5.0, 25.0, 2)},
+    ),
+    "disjoint": (
+        [("a", "prompt", "nemotron", 0, 4), ("b", "prompt", "nemotron", 6, 8)],
+        {"column 'prompt'": ("nemotron", 6.0, 14.0, 70.0, 2)},
+    ),
+    "nested": (
+        [("a", "prompt", "nemotron", 0, 10), ("b", "prompt", "nemotron", 2, 3)],
+        {"column 'prompt'": ("nemotron", 10.0, 10.0, 50.0, 2)},
+    ),
+    "two-columns": (
+        [
+            ("a", "prompt", "nemotron", 0, 10),
+            ("b", "label", "gpt-4.1-mini", 2, 4),
+            ("c", "label", "gpt-4.1-mini", 3, 5),
+        ],
+        {
+            "column 'prompt'": ("nemotron", 10.0, 10.0, 50.0, 1),
+            "column 'label'": ("gpt-4.1-mini", 3.0, 17.0, 85.0, 2),
+        },
+    ),
+    "before-start-clipped": (
+        [("a", "prompt", "nemotron", -5, 2)],
+        {"column 'prompt'": ("nemotron", 2.0, 18.0, 90.0, 1)},
+    ),
+}
+
+
+@pytest.mark.parametrize("delivery", ["in-order", "release-before-acquire"])
+@pytest.mark.parametrize("case", list(_WAIT_CASES), ids=list(_WAIT_CASES))
+def test_reporter_logs_per_column_request_wait_as_union_of_leases(
+    caplog: pytest.LogCaptureFixture, case: str, delivery: str
+) -> None:
+    """Overlapping requests count once (union, not sum); events stamped in order can be delivered out of order."""
+    leases, expected = _WAIT_CASES[case]
+    reporter = _wait_reporter()
+    base = time.monotonic() - 20.0
+    reporter._start_monotonic = base  # noqa: SLF001
+    events = []
+    for lease, column, model_id, acquired_s, released_s in leases:
+        correlation = _wait_correlation(column)
+        events.append(_lease_event("request_lease_acquired", base + acquired_s, lease, correlation, model_id))
+        events.append(_lease_event("request_lease_released", base + released_s, lease, correlation, model_id))
+    if delivery == "release-before-acquire":
+        events.reverse()
+
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        for event in events:
+            emit_request_admission_event(event)
+        reporter.log_final()
+
+    _assert_wait_lines(caplog, expected)
+    header = next(r.getMessage() for r in caplog.records if "Model request wait per column" in r.getMessage())
+    run_wall_time = re.search(r"idle = run wall time ([\d.]+)s minus time with >=1 request in flight", header)
+    assert run_wall_time is not None
+    assert float(run_wall_time.group(1)) == pytest.approx(20.0, abs=0.5)
+
+
+def test_reporter_counts_paired_wait_completed_and_lease_acquired_once(caplog: pytest.LogCaptureFixture) -> None:
+    """The controller emits request_wait_completed next to request_lease_acquired; only the lease is a request."""
+    reporter = _wait_reporter()
+    base = time.monotonic() - 20.0
+    reporter._start_monotonic = base  # noqa: SLF001
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        for kind, at in [("request_wait_completed", 0), ("request_lease_acquired", 0), ("request_lease_released", 10)]:
+            emit_request_admission_event(_lease_event(kind, base + at, "a", _wait_correlation()))
+        reporter.log_final()
+
+    _assert_wait_lines(caplog, {"column 'prompt'": ("nemotron", 10.0, 10.0, 50.0, 1)})
+
+
+@pytest.mark.parametrize("scenario", ["no-requests", "foreign-or-unpaired-events"])
+def test_reporter_omits_request_wait_block_without_owned_leases(
+    caplog: pytest.LogCaptureFixture, scenario: str
+) -> None:
+    """Columns that made no model request (and other runs' or uncorrelated events) get no idle line."""
+    reporter = _wait_reporter()
+    base = time.monotonic() - 20.0
+    reporter._start_monotonic = base  # noqa: SLF001
+    events = []
+    if scenario == "foreign-or-unpaired-events":
+        other_run = _wait_correlation(run_id="run-b")
+        events = [
+            _lease_event("request_lease_acquired", base, "x", other_run),
+            _lease_event("request_lease_released", base + 10, "x", other_run),
+            _lease_event("request_lease_acquired", base, "y", None),
+            _lease_event("request_wait_completed", base, "z", _wait_correlation()),
+            _lease_event("request_lease_released", base + 1, "orphan", _wait_correlation()),
+        ]
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        for event in events:
+            emit_request_admission_event(event)
+        reporter.log_final()
+
+    assert not any("Model request wait per column" in record.getMessage() for record in caplog.records)
+
+
+def test_reporter_counts_lease_open_at_end_and_unsubscribes_on_close(caplog: pytest.LogCaptureFixture) -> None:
+    """A lease still held when the run ends counts up to the end; events after close() are ignored."""
+    reporter = _wait_reporter()
+    reporter._start_monotonic = time.monotonic() - 20.0  # noqa: SLF001
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        reporter.log_start(num_row_groups=1)
+        emit_request_admission_event(
+            _lease_event("request_lease_acquired", time.monotonic() - 3.0, "a", _wait_correlation())
+        )
+        reporter.log_final()
+        emit_request_admission_event(_lease_event("request_lease_acquired", time.monotonic(), "b", _wait_correlation()))
+
+    ((models, wait, _idle, _pct, requests),) = _wait_lines(caplog).values()
+    assert models == "nemotron"
+    assert requests == 1
+    assert 2.5 < wait < 4.0
+
+
+def test_reporter_sanitizes_column_labels_in_request_wait_block(caplog: pytest.LogCaptureFixture) -> None:
+    """Column names are user input; the new block must not write terminal control sequences to the log."""
+    unsafe = "evil\033]52;c;payload\007\ncolumn"
+    reporter = AsyncProgressReporter({unsafe: ProgressTracker(total_records=1, label=f"column '{unsafe}'", quiet=True)})
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        now = time.monotonic()
+        emit_request_admission_event(_lease_event("request_lease_acquired", now, "a", _wait_correlation(unsafe)))
+        emit_request_admission_event(_lease_event("request_lease_released", now, "a", _wait_correlation(unsafe)))
+        reporter.log_final()
+
+    assert any("request_wait_wall_time_s" in record.getMessage() for record in caplog.records)
+    assert all(record.getMessage().isprintable() for record in caplog.records)
+
+
+class _SlowChatClient:
+    provider_name = "nvidia"
+
+    def __init__(self, delay: float, failures: int = 0, barrier: threading.Barrier | None = None) -> None:
+        self.delay = delay
+        self.failures = failures
+        self.barrier = barrier
+        self.calls = 0
+        self.durations: list[float] = []
+
+    def supports_chat_completion(self) -> bool:
+        return True
+
+    def _finish(self, started: float) -> ChatCompletionResponse:
+        self.durations.append(time.monotonic() - started)
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ProviderError(kind=ProviderErrorKind.INTERNAL_SERVER, message="unavailable", status_code=503)
+        return ChatCompletionResponse(AssistantMessage(content="ok"))
+
+    def completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+        started = time.monotonic()
+        if self.barrier is not None:
+            self.barrier.wait()  # all calls are in flight together, however the threads get scheduled
+        time.sleep(self.delay)
+        return self._finish(started)
+
+    async def acompletion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+        started = time.monotonic()
+        await asyncio.sleep(self.delay)
+        return self._finish(started)
+
+
+def _in_run(fn: Callable[[], object]) -> object:
+    token = runtime_correlation_provider.set(_wait_correlation())
+    try:
+        return fn()
+    finally:
+        runtime_correlation_provider.reset(token)
+
+
+@pytest.mark.parametrize(
+    "mode,expected_requests,retries,backoff",
+    [
+        pytest.param("async-gather", 3, 0, 0.0, id="async-gather"),
+        pytest.param("sync-threads", 3, 0, 0.0, id="sync-threads"),
+        pytest.param("async-retry", 2, 1, 0.0, id="async-retry"),
+        pytest.param("retry-backoff-idle", 2, 1, 0.5, id="retry-backoff-idle"),
+    ],
+)
+def test_reporter_request_wait_through_real_admission_controller(
+    caplog: pytest.LogCaptureFixture, mode: str, expected_requests: int, retries: int, backoff: float
+) -> None:
+    """Lease events come from the real controller and executor; the controller always emits them on the global bus."""
+    concurrent = mode in ("async-gather", "sync-threads")
+    client = _SlowChatClient(
+        0.3,
+        failures=0 if concurrent else 1,
+        barrier=threading.Barrier(3, timeout=5.0) if mode == "sync-threads" else None,
+    )
+    controller = AdaptiveRequestAdmissionController()
+    controller.register(provider_name="nvidia", model_id="nemotron", alias="default", max_parallel_requests=4)
+    executor = ModelRequestExecutor(
+        client, controller, "nvidia", "nemotron", retry_config=RetryConfig(max_retries=retries, backoff_factor=backoff)
+    )
+    request = ChatCompletionRequest(model="nemotron", messages=[])
+    reporter = _wait_reporter()
+
+    async def gather() -> None:
+        await asyncio.gather(*(executor.acompletion(request) for _ in range(3)))
+
+    with caplog.at_level(logging.INFO):
+        reporter.log_start(num_row_groups=1)
+        if mode == "async-gather":
+            _in_run(lambda: asyncio.run(gather()))
+        elif mode == "sync-threads":
+            threads = [threading.Thread(target=lambda: _in_run(lambda: executor.completion(request))) for _ in range(3)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        else:
+            _in_run(lambda: asyncio.run(executor.acompletion(request)))
+        reporter.log_final()
+
+    ((models, wait, idle, _pct, requests),) = _wait_lines(caplog).values()
+    summed = sum(client.durations)
+    assert models == "nemotron"
+    assert requests == expected_requests
+    # Bounds are relative to the measured call time so load on the test machine cannot flip them;
+    # the logged value is rounded to 0.1 s.
+    if concurrent:
+        # Three calls share their last 0.3 s, so the union is at least 0.6 s below the sum.
+        assert 0.25 < wait < summed - 0.4
+    else:
+        # Attempts run one after another, so the union equals the sum; a counted backoff would add 0.5 s.
+        assert summed - 0.1 < wait < summed + 0.25
+    if backoff:
+        assert idle >= 0.4
