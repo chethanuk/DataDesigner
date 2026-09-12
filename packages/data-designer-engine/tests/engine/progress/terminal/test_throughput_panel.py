@@ -779,6 +779,12 @@ _WAIT_CASES = {
         [("a", "prompt", "nemotron", -5, 2)],
         {"column 'prompt'": ("nemotron", 2.0, 18.0, 90.0, 1)},
     ),
+    # A column whose first request starts late still measures idle against the whole run, so the time
+    # before it started counts as idle. The denominator is the run, not the column's own window.
+    "late-start": (
+        [("a", "prompt", "nemotron", 12, 17)],
+        {"column 'prompt'": ("nemotron", 5.0, 15.0, 75.0, 1)},
+    ),
 }
 
 
@@ -987,3 +993,7 @@ def test_reporter_request_wait_through_real_admission_controller(
         assert summed - 0.1 < wait < summed + 0.25
     if backoff:
         assert idle >= 0.4
+    # Every acquire this run emitted reached the reporter, so nothing is left half-paired: the pairing
+    # state is empty once the run ends, including across retries and concurrent threads.
+    assert reporter._open_leases == {}  # noqa: SLF001
+    assert reporter._early_releases == {}  # noqa: SLF001
