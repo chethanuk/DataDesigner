@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import heapq
 from collections import Counter, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -51,7 +50,6 @@ class RequestFairQueue:
         self._queued: dict[str, RequestWaiter] = {}
         self._waiter_groups: dict[str, RequestResourceKey] = {}
         self._group_finish: dict[RequestResourceKey, float] = {}
-        self._heap: list[tuple[float, int, RequestResourceKey]] = []
         self._active_heap_entries: dict[RequestResourceKey, tuple[float, int]] = {}
         self._sequence = 0
         self._sequence_version = 0
@@ -91,16 +89,10 @@ class RequestFairQueue:
         self, is_eligible: Callable[[RequestWaiter, RequestQueueView], bool]
     ) -> RequestQueueSelection | None:
         view = self.view()
-        heap_copy = list(self._heap)
-        heapq.heapify(heap_copy)
-        active_seen: set[RequestResourceKey] = set()
-        while heap_copy:
-            finish, sequence, key = heapq.heappop(heap_copy)
-            if key in active_seen:
-                continue
-            if self._active_heap_entries.get(key) != (finish, sequence):
-                continue
-            active_seen.add(key)
+        active_entries = sorted(
+            (finish, sequence, key) for key, (finish, sequence) in self._active_heap_entries.items()
+        )
+        for _finish, _sequence, key in active_entries:
             waiter = self._first_valid_waiter(key)
             if waiter is None:
                 continue
@@ -165,7 +157,6 @@ class RequestFairQueue:
             return
         self._sequence += 1
         finish = self._group_finish.get(key, self._virtual_time)
-        heapq.heappush(self._heap, (finish, self._sequence, key))
         self._active_heap_entries[key] = (finish, self._sequence)
 
     def _first_valid_waiter(self, key: RequestResourceKey) -> RequestWaiter | None:
