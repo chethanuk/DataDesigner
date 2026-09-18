@@ -46,10 +46,10 @@ def reset_command() -> None:
     console.print()
 
     if provider_exists:
-        print_text(f"{LOG_INDENT}⚙️  Model providers: {provider_repo.config_file}")
+        print_text(f"{LOG_INDENT}⚙️  Model providers: {provider_repo.source_file}")
 
     if model_exists:
-        print_text(f"{LOG_INDENT}🤖 Model configs: {model_repo.config_file}")
+        print_text(f"{LOG_INDENT}🤖 Model configs: {model_repo.source_file}")
 
     console.print()
     console.print()
@@ -64,7 +64,7 @@ def reset_command() -> None:
     # Ask for confirmation and delete model providers
     if provider_exists:
         if confirm_action(
-            f"Delete model providers configuration in {str(provider_repo.config_file)!r}?", default=False
+            f"Delete model providers configuration in {str(provider_repo.source_file)!r}?", default=False
         ):
             try:
                 provider_repo.delete()
@@ -80,7 +80,7 @@ def reset_command() -> None:
 
     # Ask for confirmation and delete model configs
     if model_exists:
-        if confirm_action(f"Delete model configs configuration in {str(model_repo.config_file)!r}?", default=False):
+        if confirm_action(f"Delete model configs configuration in {str(model_repo.source_file)!r}?", default=False):
             try:
                 model_repo.delete()
                 print_success("Deleted model configs configuration")
