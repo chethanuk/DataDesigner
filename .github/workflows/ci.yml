@@ -130,6 +130,33 @@ jobs:
             pytest packages/data-designer/tests
 
   # ===========================================================================
+  # Agent Tools
+  # .agents/tools/ sits outside the three package test suites, so it needs its
+  # own job. Runs here rather than in agentic-ci-pr-review.yml: that workflow is
+  # pull_request_target with secrets in scope and deliberately loads .agents/
+  # files from the base branch, so it must not execute test code from a PR.
+  # ===========================================================================
+
+  test-agent-tools:
+    name: Test Agent Tools
+    needs: validate-dispatch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "latest"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Run agent tool tests
+        run: make test-agent-tools
+
+  # ===========================================================================
   # Combined Coverage Check
   # Runs all tests together to verify overall coverage threshold
   # ===========================================================================
@@ -281,7 +308,7 @@ jobs:
   test-summary:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
     runs-on: ubuntu-latest
-    needs: [validate-dispatch, test-config, test-engine, test-interface]
+    needs: [validate-dispatch, test-config, test-engine, test-interface, test-agent-tools]
     if: always()
     strategy:
       matrix:
@@ -294,12 +321,14 @@ jobs:
           if [[ "${{ needs.validate-dispatch.result }}" != "success" ]] || \
              [[ "${{ needs.test-config.result }}" != "success" ]] || \
              [[ "${{ needs.test-engine.result }}" != "success" ]] || \
-             [[ "${{ needs.test-interface.result }}" != "success" ]]; then
+             [[ "${{ needs.test-interface.result }}" != "success" ]] || \
+             [[ "${{ needs.test-agent-tools.result }}" != "success" ]]; then
             echo "One or more test jobs failed"
             echo "validate-dispatch: ${{ needs.validate-dispatch.result }}"
             echo "test-config: ${{ needs.test-config.result }}"
             echo "test-engine: ${{ needs.test-engine.result }}"
             echo "test-interface: ${{ needs.test-interface.result }}"
+            echo "test-agent-tools: ${{ needs.test-agent-tools.result }}"
             exit 1
           fi
           echo "All test jobs passed successfully"

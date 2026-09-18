@@ -26,7 +26,6 @@ from graphify.extract import extract
 from networkx.readwrite import json_graph
 
 _REPO_ROOT_DEFAULT = Path(__file__).resolve().parent.parent.parent
-_REPO_ROOT = _REPO_ROOT_DEFAULT
 
 # DD layering: interface -> engine -> config (left depends on right).
 _LEGAL_DIRECTIONS = {("interface", "engine"), ("interface", "config"), ("engine", "config")}
@@ -45,20 +44,20 @@ _KNOWN_PACKAGE_DIRS = frozenset(p.parts[1] for p in _PACKAGE_SUBDIRS)
 _STDLIB_LABELS = {"ABC", "BaseModel", "Enum", "Field"}
 
 
-def _collect_source_files() -> list[Path]:
+def _collect_source_files(repo_root: Path) -> list[Path]:
     files: list[Path] = []
-    for d in [_REPO_ROOT / sub for sub in _PACKAGE_SUBDIRS]:
+    for d in [repo_root / sub for sub in _PACKAGE_SUBDIRS]:
         if d.exists():
             files.extend(p for p in d.rglob("*.py") if not any(part.startswith(".") for part in p.relative_to(d).parts))
     return sorted(files)
 
 
-def _unknown_package_dirs(paths: list[Path]) -> list[str]:
+def _unknown_package_dirs(paths: list[Path], repo_root: Path) -> list[str]:
     """Return distinct package directory names under packages/ that are not in _KNOWN_PACKAGE_DIRS."""
     found: set[str] = set()
     for p in paths:
         try:
-            rel = p.resolve().relative_to(_REPO_ROOT)
+            rel = p.resolve().relative_to(repo_root)
         except ValueError:
             continue
         parts = rel.parts
@@ -79,9 +78,9 @@ def _get_package(filepath: str) -> str:
     return ""
 
 
-def _rel(filepath: str) -> str:
+def _rel(filepath: str, repo_root: Path) -> str:
     try:
-        return str(Path(filepath).relative_to(_REPO_ROOT))
+        return str(Path(filepath).relative_to(repo_root))
     except ValueError:
         return filepath
 
@@ -218,13 +217,13 @@ def _fmt_cross_pkg(items: list[dict], limit: int = 6) -> list[str]:
 # -- Modes --
 
 
-def _changed_files_mode(changed_files: list[Path], deleted_files: list[Path] | None = None) -> str:
+def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_files: list[Path] | None = None) -> str:
     """PR review: analyze changed files against full codebase."""
     t0 = time.monotonic()
-    analysis = _build_graph(_collect_source_files())
+    analysis = _build_graph(_collect_source_files(repo_root))
     G, communities, gods = analysis.graph, analysis.communities, analysis.god_nodes
 
-    changed_paths = {str(p.resolve()) for p in changed_files}
+    changed_paths = {str(p) for p in changed_files}
     changed_node_ids = {nid for nid in G.nodes() if G.nodes[nid].get("source_file") in changed_paths}
 
     node_to_community = {n: cid for cid, nodes in communities.items() for n in nodes}
@@ -235,7 +234,7 @@ def _changed_files_mode(changed_files: list[Path], deleted_files: list[Path] | N
         [
             {
                 "label": G.nodes[nid].get("label", nid),
-                "source": _rel(G.nodes[nid].get("source_file", "")),
+                "source": _rel(G.nodes[nid].get("source_file", ""), repo_root),
                 "degree": G.degree(nid),
             }
             for nid in changed_node_ids
@@ -276,7 +275,7 @@ def _changed_files_mode(changed_files: list[Path], deleted_files: list[Path] | N
 
     elapsed = time.monotonic() - t0
     file_count = len(changed_files) + n_deleted
-    unknown_pkgs = _unknown_package_dirs(list(changed_files) + list(deleted_files or []))
+    unknown_pkgs = _unknown_package_dirs(list(changed_files) + list(deleted_files or []), repo_root)
     lines = [
         f"### Structural Impact _(graphify, {elapsed:.1f}s)_",
         "",
@@ -301,10 +300,10 @@ def _changed_files_mode(changed_files: list[Path], deleted_files: list[Path] | N
     return "\n".join(lines)
 
 
-def _full_mode(previous_graph_path: str | None = None) -> str:
+def _full_mode(repo_root: Path, previous_graph_path: str | None = None) -> str:
     """Structure audit: full codebase analysis with optional diff."""
     t0 = time.monotonic()
-    analysis = _build_graph(_collect_source_files())
+    analysis = _build_graph(_collect_source_files(repo_root))
     G, communities, gods = analysis.graph, analysis.communities, analysis.god_nodes
     elapsed = time.monotonic() - t0
 
@@ -350,7 +349,7 @@ def _full_mode(previous_graph_path: str | None = None) -> str:
             lines += [f"_Could not diff against previous graph: {exc}_", ""]
 
     # Save graph + baselines for next run.
-    out_dir = _REPO_ROOT / "graphify-out"
+    out_dir = repo_root / "graphify-out"
     out_dir.mkdir(exist_ok=True)
     to_json(G, communities, str(out_dir / "graph.json"))
     (out_dir / "baselines.json").write_text(
@@ -371,8 +370,6 @@ def _full_mode(previous_graph_path: str | None = None) -> str:
 
 
 def main() -> None:
-    global _REPO_ROOT
-
     parser = argparse.ArgumentParser(description="Structural impact analysis via graphify")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--changed-files", nargs="+", help="PR review mode: list of changed Python files")
@@ -382,24 +379,23 @@ def main() -> None:
     parser.add_argument("--repo-root", help="Override repo root (when script runs from a different checkout)")
     args = parser.parse_args()
 
-    if args.repo_root:
-        _REPO_ROOT = Path(args.repo_root).resolve()
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT_DEFAULT
 
     if args.changed_files:
         all_paths = [
-            Path(raw) if Path(raw).is_absolute() else _REPO_ROOT / raw
+            Path(raw) if Path(raw).is_absolute() else repo_root / raw
             for raw in args.changed_files
             if raw.endswith(".py")
         ]
         changed = [p for p in all_paths if p.exists()]
         deleted = [p for p in all_paths if not p.exists()]
         report = (
-            _changed_files_mode(changed, deleted_files=deleted or None)
+            _changed_files_mode(changed, repo_root, deleted_files=deleted or None)
             if changed or deleted
             else "### Structural Impact\n\nNo Python files changed - skipping.\n"
         )
     else:
-        report = _full_mode(args.previous_graph)
+        report = _full_mode(repo_root, args.previous_graph)
 
     if args.output:
         Path(args.output).write_text(report, encoding="utf-8")
