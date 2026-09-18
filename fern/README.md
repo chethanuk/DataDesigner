@@ -51,7 +51,7 @@ Fern publishing uses the dedicated Fern workflows:
 
 - `.github/workflows/build-fern-docs.yml` runs on release publication or manual dispatch. It snapshots release docs into the CI-managed `docs-website` branch, builds executed notebooks from the release source, runs `make check-fern-docs` from `docs-website`, and publishes Fern.
 - `.github/workflows/publish-fern-devnotes.yml` runs on `main` when Dev Notes or Fern Dev Notes assets change, plus manual dispatch. It patches only Dev Notes into the `docs-website` branch's current latest docs, reuses the last docs notebook artifact, runs `make check-fern-docs`, and publishes Fern.
-- `.github/workflows/docs-preview.yml` posts Fern preview links for same-repository PRs. Fork PRs still run docs checks, but skip hosted previews because those require deployment secrets.
+- `.github/workflows/docs-preview.yml` builds and checks the preview for every docs PR with read-only permissions and no secrets, and uploads it as an artifact for same-repository PRs. `.github/workflows/docs-preview-deploy.yml` runs after it (`workflow_run`), publishes the Fern preview with `DOCS_FERN_TOKEN`, and updates the PR comment. Fork PRs still run docs checks but get no hosted preview. `workflow_run` only runs from the default branch, so changes to the deploy workflow take effect after merge.
 
 These workflows require the org-level `DOCS_FERN_TOKEN` secret. The workflows expose it to the Fern CLI as `FERN_TOKEN`.
 
