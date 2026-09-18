@@ -75,7 +75,7 @@ The repository includes skills for common development tasks. These are located i
 Data Designer docs are Fern-first. The legacy MkDocs archive remains frozen on GitHub Pages for releases `0.5.7` and older.
 
 - Edit docs prose under `fern/`.
-- Edit tutorial notebooks in `docs/notebook_source/*.py`.
+- Edit tutorial notebooks in `fern/notebook_source/*.py`.
 - Use `make serve-fern-docs-locally` to preview the Fern site.
 - Use `make check-fern-docs` to regenerate local Fern artifacts and validate the Fern site.
 - Fern release publishing snapshots versioned docs into the CI-managed `docs-website` branch automatically.

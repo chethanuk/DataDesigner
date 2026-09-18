@@ -25,7 +25,7 @@ import type { ReactNode } from "react";
  *
  * The trust boundary is the converter pipeline:
  *
- *   docs/notebook_source/*.py  (jupytext source — code-reviewed at PR time)
+ *   fern/notebook_source/*.py  (jupytext source — code-reviewed at PR time)
  *     └─> jupytext --execute    (runs in CI/maintainer shell with NVIDIA_API_KEY)
  *           └─> *.ipynb         (real outputs captured)
  *                 └─> fern/scripts/ipynb-to-fern-json.py
@@ -44,7 +44,7 @@ import type { ReactNode } from "react";
  *
  *   <NotebookViewer
  *     notebook={notebook}
- *     colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner/blob/main/docs/colab_notebooks/1-the-basics.ipynb"
+ *     colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner/blob/main/fern/colab_notebooks/1-the-basics.ipynb"
  *   />
  */
 
