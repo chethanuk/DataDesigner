@@ -23,6 +23,11 @@ REDIRECT_VERSION_RE = re.compile(
     r'^\s*destination:\s+["\']/nemo/datadesigner/((?:v[0-9][^/"\']*)|older-versions)(?:/|["\'])'
 )
 VERSION_SLUG_RE = re.compile(r"^\s*slug:\s+['\"]?([^'\"\s]+)")
+# Docs support files moved from docs/ to fern/. Published pages from older releases still link the old
+# GitHub paths on main, which no longer exist, so point them at the new location when publishing.
+MOVED_SUPPORT_LINK_RE = re.compile(
+    r"(NVIDIA-NeMo/DataDesigner/blob/main/)docs/(?=(?:assets|colab_notebooks|notebook_source|scripts)/)"
+)
 SKIP_NAMES = {
     ".git",
     ".mypy_cache",
@@ -331,6 +336,14 @@ def materialize_version_nav_pages(published_root: Path) -> None:
             nav.write_text("".join(lines))
 
 
+def retarget_moved_support_links(published_root: Path) -> None:
+    for page in sorted((published_root / "fern" / "versions").rglob("*.mdx")):
+        text = page.read_text()
+        updated = MOVED_SUPPORT_LINK_RE.sub(r"\1fern/", text)
+        if updated != text:
+            page.write_text(updated)
+
+
 def sync_fern_root_config(source_root: Path, published_root: Path) -> None:
     preserved_versions_block = normalize_latest_display_name(versions_block(published_root / "fern" / "docs.yml"))
     for rel_path in FERN_ROOT_CONFIG_PATHS:
@@ -358,6 +371,7 @@ def sync_source(args: argparse.Namespace) -> int:
         )
         remove_retired_reference_archive(source_root, published_root)
         materialize_version_nav_pages(published_root)
+        retarget_moved_support_links(published_root)
         restore_versions_block(published_root / "fern" / "docs.yml", preserved_versions_block)
         validate_redirect_targets(published_root)
         write_publish_metadata(published_root, args, "release-snapshot")
@@ -414,6 +428,7 @@ def patch_devnotes(args: argparse.Namespace) -> int:
     replace_devnotes_block(target_nav, rewrite_devnotes_block(source_root, published_root, source_block))
     recipes_block = extract_navigation_section(source_nav, RECIPES_SECTION_RE)
     replace_navigation_section(target_nav, RECIPES_SECTION_RE, recipes_block)
+    retarget_moved_support_links(published_root)
     write_publish_metadata(published_root, args, "devnotes-patch")
     return 0
 
