@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = Path(__file__).resolve().parents[4] / "docs" / "scripts" / "build_notebooks_cached.sh"
+SCRIPT_PATH = Path(__file__).resolve().parents[4] / "fern" / "scripts" / "build_notebooks_cached.sh"
 
 
 @pytest.mark.parametrize(
@@ -31,11 +31,11 @@ def test_rejects_invalid_retry_settings(tmp_path: Path, setting: str, value: str
 
 def test_retries_failed_notebook_execution(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    script = repo_root / "docs" / "scripts" / SCRIPT_PATH.name
+    script = repo_root / "fern" / "scripts" / SCRIPT_PATH.name
     script.parent.mkdir(parents=True)
     shutil.copy2(SCRIPT_PATH, script)
 
-    source_dir = repo_root / "docs" / "notebook_source"
+    source_dir = repo_root / "fern" / "notebook_source"
     source_dir.mkdir()
     (source_dir / "_README.md").write_text("README\n")
     (source_dir / "_pyproject.toml").write_text('[project]\nname = "notebooks"\n')
@@ -73,5 +73,5 @@ printf '%s\n' '{"cells": []}' > "${src%.py}.ipynb"
 
     assert attempts_file.read_text() == "2"
     assert "Attempt 1 failed; retrying" in result.stdout
-    assert (repo_root / "docs" / "notebooks" / "example.ipynb").exists()
+    assert (repo_root / "fern" / "notebooks" / "example.ipynb").exists()
     assert (repo_root / ".notebook-cache" / "example.sha256").exists()

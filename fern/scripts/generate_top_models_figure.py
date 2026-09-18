@@ -15,19 +15,19 @@ path rendered by the README and docs site:
 
     fern/images/top-models.png
 
-The source telemetry export lives at docs/scripts/top-model-usage.csv with
+The source telemetry export lives at fern/scripts/top-model-usage.csv with
 columns: model name, input (context) tokens, output (generated) tokens, plus a
 trailing "Other" aggregate row. Drop in a fresh export to refresh the figure.
 
 Run:
     # Regenerate from the committed CSV (zero args)
-    uv run docs/scripts/generate_top_models_figure.py
+    uv run fern/scripts/generate_top_models_figure.py
 
     # Refresh from a new telemetry export
-    uv run docs/scripts/generate_top_models_figure.py --csv ~/Downloads/new-export.csv
+    uv run fern/scripts/generate_top_models_figure.py --csv ~/Downloads/new-export.csv
 
     # Options
-    uv run docs/scripts/generate_top_models_figure.py --help
+    uv run fern/scripts/generate_top_models_figure.py --help
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-# Repo root is two levels up from docs/scripts/.
+# Repo root is two levels up from fern/scripts/.
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CSV = REPO_ROOT / "docs" / "scripts" / "top-model-usage.csv"
+DEFAULT_CSV = REPO_ROOT / "fern" / "scripts" / "top-model-usage.csv"
 # Tracked figure path rendered by the README and Fern docs site.
 TARGETS = (REPO_ROOT / "fern" / "images" / "top-models.png",)
 

@@ -79,7 +79,7 @@ help:
 	@echo "  show-versions             - Show versions of all packages"
 	@echo "  convert-execute-notebooks - Convert notebooks from .py to .ipynb using jupytext (USE_CACHE=1 to skip unchanged)"
 	@echo "  generate-colab-notebooks  - Generate Colab-compatible notebooks"
-	@echo "  generate-fern-notebooks   - Convert docs/notebook_source/*.py → fern/components/notebooks/{json,ts}"
+	@echo "  generate-fern-notebooks   - Convert fern/notebook_source/*.py → fern/components/notebooks/{json,ts}"
 	@echo "  generate-fern-notebooks-with-outputs - Full pipeline: execute notebooks (needs API key), colabify, convert to Fern"
 	@echo "  install-docs-deps        - Install docs and notebook dependencies"
 	@echo "  prepare-fern-release VERSION=X.Y.Z - Add or refresh Fern version files for release preview"
@@ -298,7 +298,7 @@ test-run-tutorials:
 	@echo "🧪 Running tutorials as e2e tests..."
 	@TUTORIAL_WORKDIR=$$(mktemp -d); \
 	trap "rm -rf $$TUTORIAL_WORKDIR" EXIT; \
-	for f in docs/notebook_source/*.py; do \
+	for f in fern/notebook_source/*.py; do \
 		echo "  📓 Running $$f..."; \
 		(cd "$$TUTORIAL_WORKDIR" && uv run --project "$(REPO_PATH)" --group notebooks python "$(REPO_PATH)/$$f") || exit 1; \
 	done; \
@@ -310,7 +310,7 @@ test-run-recipes:
 	@echo "🧪 Running recipes as e2e tests..."
 	@RECIPE_WORKDIR=$$(mktemp -d); \
 	trap "rm -rf $$RECIPE_WORKDIR" EXIT; \
-	for f in docs/assets/recipes/**/*.py; do \
+	for f in fern/assets/recipes/**/*.py; do \
 		echo "  📜 Running $$f..."; \
 		(cd "$$RECIPE_WORKDIR" && uv run --project "$(REPO_PATH)" --group notebooks --group recipes python "$(REPO_PATH)/$$f" --model-alias nvidia-text --artifact-path "$$RECIPE_WORKDIR" --num-records 5) || exit 1; \
 	done; \
@@ -556,52 +556,52 @@ serve-fern-docs-local-theme:
 convert-execute-notebooks:
 ifeq ($(USE_CACHE),1)
 	@echo "📓 Converting Python tutorials to notebooks (with caching)..."
-	@$(DOCS_CERTS) DOCS_JUPYTEXT=$(DOCS_JUPYTEXT) bash docs/scripts/build_notebooks_cached.sh
+	@$(DOCS_CERTS) DOCS_JUPYTEXT=$(DOCS_JUPYTEXT) bash fern/scripts/build_notebooks_cached.sh
 else
 	@echo "📓 Converting Python tutorials to notebooks and executing ($(DOCS_PYTHON))..."
-	@rm -rf docs/notebooks
-	@mkdir -p docs/notebooks
-	cp docs/notebook_source/_README.md docs/notebooks/README.md
-	cp docs/notebook_source/_pyproject.toml docs/notebooks/pyproject.toml
+	@rm -rf fern/notebooks
+	@mkdir -p fern/notebooks
+	cp fern/notebook_source/_README.md fern/notebooks/README.md
+	cp fern/notebook_source/_pyproject.toml fern/notebooks/pyproject.toml
 	@$(DOCS_CERTS) bash -c '\
 		failed=""; \
-		for f in docs/notebook_source/*.py; do \
+		for f in fern/notebook_source/*.py; do \
 			[ -f "$$f" ] || continue; \
 			echo "▶ executing $$f"; \
 			$(DOCS_JUPYTEXT) --to ipynb --execute "$$f" || failed="$$failed\n   • $$f"; \
 		done; \
-		for f in docs/notebook_source/*.ipynb; do [ -f "$$f" ] && mv "$$f" docs/notebooks/; done; \
-		rm -rf docs/notebook_source/artifacts; \
-		rm -f docs/notebook_source/*.csv; \
+		for f in fern/notebook_source/*.ipynb; do [ -f "$$f" ] && mv "$$f" fern/notebooks/; done; \
+		rm -rf fern/notebook_source/artifacts; \
+		rm -f fern/notebook_source/*.csv; \
 		if [ -n "$$failed" ]; then \
 			echo ""; \
 			echo "❌ Some notebooks failed (often missing API keys for image/audio providers)."; \
 			printf "   Failed:%b\n" "$$failed"; \
 			exit 1; \
 		fi'
-	@echo "✅ Notebooks executed under docs/notebooks/"
+	@echo "✅ Notebooks executed under fern/notebooks/"
 endif
 
 generate-colab-notebooks:
 	@echo "📓 Generating Colab-compatible notebooks ($(DOCS_PYTHON))..."
 ifdef FILES_FILE
 	@if [ -s "$(FILES_FILE)" ]; then \
-		xargs -0 -n 1 $(DOCS_PYTHON) docs/scripts/generate_colab_notebooks.py --files < "$(FILES_FILE)"; \
+		xargs -0 -n 1 $(DOCS_PYTHON) fern/scripts/generate_colab_notebooks.py --files < "$(FILES_FILE)"; \
 	fi
 else
-	$(DOCS_PYTHON) docs/scripts/generate_colab_notebooks.py
+	$(DOCS_PYTHON) fern/scripts/generate_colab_notebooks.py
 endif
-	@echo "✅ Colab notebooks created in docs/colab_notebooks/"
+	@echo "✅ Colab notebooks created in fern/colab_notebooks/"
 
 generate-fern-notebooks:
 	@echo "📓 Converting notebooks to Fern format for NotebookViewer ($(DOCS_PYTHON))..."
 	@mkdir -p fern/components/notebooks
 	@failed=; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	for src in docs/notebook_source/*.py; do \
+	for src in fern/notebook_source/*.py; do \
 		[ -f "$$src" ] || continue; \
 		name=$$(basename "$$src" .py); \
-		if [ -f "docs/notebooks/$$name.ipynb" ]; then \
-			input="docs/notebooks/$$name.ipynb"; \
+		if [ -f "fern/notebooks/$$name.ipynb" ]; then \
+			input="fern/notebooks/$$name.ipynb"; \
 			source_label="notebook"; \
 		else \
 			input="$$tmp_dir/$$name.ipynb"; \
@@ -753,7 +753,7 @@ clean-dist:
 
 clean-notebooks:
 	@echo "🧹 Cleaning up notebooks..."
-	rm -rf docs/notebooks
+	rm -rf fern/notebooks
 	@echo "✅ Notebooks cleaned!"
 
 clean-test-coverage:

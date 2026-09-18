@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = Path(__file__).resolve().parents[4] / "docs" / "scripts" / "fern_notebook_snapshot.sh"
+SCRIPT_PATH = Path(__file__).resolve().parents[4] / "fern" / "scripts" / "fern_notebook_snapshot.sh"
 
 
 def write_notebooks(root: Path) -> dict[str, str]:
