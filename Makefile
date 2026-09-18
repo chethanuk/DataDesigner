@@ -21,6 +21,12 @@ ALL_PKG_PATHS := packages/ scripts/ tests_e2e/
 CONFIG_TESTS := $(CONFIG_PKG)/tests
 ENGINE_TESTS := $(ENGINE_PKG)/tests
 INTERFACE_TESTS := $(INTERFACE_PKG)/tests
+AGENT_TOOLS_TESTS := .agents/tools/tests
+
+# structural_impact.py imports graphify at module level, and graphify is not a workspace
+# dependency - CI installs it ad hoc (.github/workflows/agentic-ci-pr-review.yml). Keep the
+# version in step with that workflow.
+GRAPHIFY_PIN := graphifyy==0.4.23
 
 define install-pre-commit-hooks
 	@if [ ! -f $(REPO_PATH)/.git/hooks/pre-commit ]; then \
@@ -48,6 +54,7 @@ help:
 	@echo ""
 	@echo "🧪 Testing (all packages):"
 	@echo "  test                      - Run all unit tests"
+	@echo "  test-agent-tools          - Test the scripts in .agents/tools"
 	@echo "  coverage                  - Run tests with coverage report"
 	@echo "  test-e2e                  - Run e2e plugin tests"
 	@echo "  health-checks             - Run provider health checks"
@@ -180,7 +187,7 @@ install-dev-recipes:
 # TESTING
 # ==============================================================================
 
-test: test-config test-engine test-interface
+test: test-config test-engine test-interface test-agent-tools
 	@echo "✅ All package tests complete!"
 
 test-config:
@@ -194,6 +201,10 @@ test-engine:
 test-interface:
 	@echo "🧪 Testing data-designer (interface)..."
 	uv run --group dev pytest $(INTERFACE_TESTS)
+
+test-agent-tools:
+	@echo "🧪 Testing agent tools (.agents/tools)..."
+	uv run --group dev --with $(GRAPHIFY_PIN) pytest $(AGENT_TOOLS_TESTS)
 
 # ------------------------------------------------------------------------------
 # Isolated Testing (mirrors CI behavior)
@@ -779,7 +790,7 @@ clean-test-coverage:
         lint lint-config lint-engine lint-fix lint-fix-config lint-fix-engine lint-fix-interface lint-interface \
         perf-import perf-import-runtime prepare-fern-docs prepare-fern-release publish serve-fern-docs-dev serve-fern-docs-local-theme serve-fern-docs-locally show-versions \
         health-checks \
-        test test-config test-config-isolated test-e2e test-engine test-engine-isolated \
+        test test-agent-tools test-config test-config-isolated test-e2e test-engine test-engine-isolated \
         test-interface test-interface-isolated test-isolated \
         test-run-all-examples test-run-recipes test-run-tutorials \
         update-license-headers verify-imports
