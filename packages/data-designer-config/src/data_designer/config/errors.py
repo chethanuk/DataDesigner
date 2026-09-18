@@ -22,3 +22,7 @@ class InvalidFilePathError(DataDesignerError): ...
 
 
 class InvalidFileFormatError(DataDesignerError): ...
+
+
+class InvalidUserConfigError(InvalidConfigError):
+    """Raised when the user configuration file (``config.toml``) cannot be parsed or validated."""

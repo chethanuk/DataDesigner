@@ -12,6 +12,8 @@ import typer
 from data_designer.cli.agent_command_defs import AGENT_COMMANDS
 from data_designer.cli.lazy_group import create_lazy_typer_group
 from data_designer.cli.runtime import ensure_cli_default_model_settings
+from data_designer.cli.ui import print_error
+from data_designer.config.errors import InvalidUserConfigError
 from data_designer.config.utils.constants import DATA_DESIGNER_PACKAGE_NAME
 
 _CMD = "data_designer.cli.commands"
@@ -279,7 +281,12 @@ def main() -> None:
     """Main entry point for the CLI."""
     if not _is_version_request(sys.argv[1:]):
         ensure_cli_default_model_settings()
-    app()
+    try:
+        app()
+    except InvalidUserConfigError as e:
+        # Every config command reads config.toml, so report a broken file once, here, not as a traceback.
+        print_error(str(e))
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
