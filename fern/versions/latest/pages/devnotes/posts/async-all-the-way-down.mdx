@@ -7,6 +7,10 @@ import { Authors } from "@/components/Authors";
 
 <Authors ids={["amanoel", "nmulepati", "etramel", "jgreco"]} />
 
+<Note title="Historical post">
+This post describes the async engine as it launched in April 2026. The `ThrottleManager` layer and the submission/LLM-wait semaphore handoff described below have since been replaced by task admission and request admission. See [Async Scheduling](/concepts/async-scheduling) for the current design.
+</Note>
+
 
 Data Designer's execution engine now schedules work at the cell level rather than the column level. Instead of running each column to completion before starting the next, the async engine dispatches a cell as soon as its specific upstream dependencies complete. Multi-model pipelines keep every endpoint saturated, and single-model pipelines benefit from AIMD-based adaptive concurrency. The result is faster pipelines with no changes to your config.
 

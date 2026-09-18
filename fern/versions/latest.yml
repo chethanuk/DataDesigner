@@ -59,6 +59,8 @@ navigation:
             path: ./latest/pages/concepts/mcp/safety-and-limits.mdx
       - page: Architecture & Performance
         path: ./latest/pages/concepts/architecture-and-performance.mdx
+      - page: Async Scheduling
+        path: ./latest/pages/concepts/async-scheduling.mdx
       - page: Deployment Options
         path: ./latest/pages/concepts/deployment-options.mdx
       - page: Security
