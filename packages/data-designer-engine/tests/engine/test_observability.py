@@ -13,13 +13,17 @@ from unittest.mock import Mock
 import pytest
 
 from data_designer.engine.observability import (
+    FilteringRequestAdmissionEventSink,
+    FilteringSchedulerAdmissionEventSink,
     JsonlSchedulerEventSink,
     RequestAdmissionEvent,
     RequestAdmissionEventKind,
+    RequestAdmissionEventSink,
     RuntimeCorrelation,
     RuntimeCorrelationProvider,
     SchedulerAdmissionEvent,
     SchedulerAdmissionEventKind,
+    SchedulerAdmissionEventSink,
     fanout_scheduler_event_sinks,
     request_event_sink_accepts,
     scheduler_event_sink_accepts,
@@ -260,6 +264,25 @@ def test_request_event_sink_interest_defaults_to_all_and_honors_filter() -> None
             raise RuntimeError(event_kind)
 
     assert not request_event_sink_accepts(BrokenInterestSink(), "model_request_started")
+
+
+@pytest.mark.parametrize(
+    ("protocol", "expected"),
+    [
+        (SchedulerAdmissionEventSink, True),
+        (RequestAdmissionEventSink, True),
+        (FilteringSchedulerAdmissionEventSink, False),
+        (FilteringRequestAdmissionEventSink, False),
+    ],
+)
+def test_sink_without_filters_satisfies_only_the_base_protocols(protocol: type, expected: bool) -> None:
+    assert isinstance(InMemoryAdmissionEventSink(), protocol) is expected
+
+
+def test_fanout_sink_is_recognized_as_a_filtering_scheduler_sink() -> None:
+    sink = fanout_scheduler_event_sinks(InMemoryAdmissionEventSink(), InMemoryAdmissionEventSink())
+
+    assert isinstance(sink, FilteringSchedulerAdmissionEventSink)
 
 
 def test_correlated_runtime_view_timeline_sorts_events() -> None:
