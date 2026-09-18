@@ -16,7 +16,7 @@ def test_notebook_cache_is_scoped_to_execution_profile() -> None:
     )
     assert "NOTEBOOK_EXECUTION_PROFILE: ${{ github.event_name == 'schedule'" in workflow
     assert "NOTEBOOK_CACHE_CONTEXT=${NOTEBOOK_EXECUTION_PROFILE}:" in workflow
-    assert workflow.count("'docs/scripts/build_notebooks_cached.sh'") == 2
+    assert workflow.count("'fern/scripts/build_notebooks_cached.sh'") == 2
     assert "key: notebooks-${{ env.NOTEBOOK_EXECUTION_PROFILE }}-" in workflow
     assert "notebooks-${{ env.NOTEBOOK_EXECUTION_PROFILE }}-\n" in workflow
     assert "gh run list --workflow build-fern-docs.yml --status success" in workflow

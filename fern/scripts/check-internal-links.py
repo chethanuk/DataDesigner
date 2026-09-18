@@ -306,7 +306,7 @@ def notebook_markdown(text: str) -> str:
 def notebook_sources(index: DocsIndex, repository_root: Path) -> list[tuple[Path, str]]:
     wrapper_pages = {page.source.stem: page for page in index.pages if "/notebooks/" in page.source.as_posix()}
     sources: list[tuple[Path, str]] = []
-    for source in sorted((repository_root / "docs/notebook_source").glob("*.py")):
+    for source in sorted((repository_root / "fern/notebook_source").glob("*.py")):
         wrapper_stem = "README" if source.stem in {"README", "_README"} else source.stem
         page = wrapper_pages.get(wrapper_stem)
         if page:

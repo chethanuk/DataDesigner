@@ -201,7 +201,7 @@ make test                        # Run all tests
 make coverage                    # Run tests with coverage report
 make perf-import                 # Profile import time
 make perf-import CLEAN=1         # Clean cache first, then profile
-make convert-execute-notebooks   # Regenerate .ipynb from docs/notebook_source/*.py
+make convert-execute-notebooks   # Regenerate .ipynb from fern/notebook_source/*.py
 make generate-colab-notebooks    # Generate Colab-compatible notebooks
 ```
 
