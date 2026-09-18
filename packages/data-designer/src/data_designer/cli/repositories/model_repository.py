@@ -8,8 +8,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from data_designer.cli.repositories.base import ConfigRepository
+from data_designer.cli.repositories.base import UserConfigSectionRepository
 from data_designer.config.models import ModelConfig
+from data_designer.config.user_config import UserConfig
 from data_designer.config.utils.constants import MODEL_CONFIGS_FILE_NAME
 from data_designer.config.utils.io_helpers import load_config_file, save_config_file
 
@@ -49,17 +50,24 @@ def _format_missing_provider_message(aliases: list[str]) -> str:
     )
 
 
-class ModelRepository(ConfigRepository[ModelConfigRegistry]):
+class ModelRepository(UserConfigSectionRepository[ModelConfigRegistry]):
     """Repository for model configurations."""
+
+    user_config_section = "model.configs"
 
     @property
     def config_file(self) -> Path:
         """Get the model configuration file path."""
         return self.config_dir / MODEL_CONFIGS_FILE_NAME
 
-    def load(self) -> ModelConfigRegistry | None:
+    def _from_user_config(self, user_config: UserConfig) -> ModelConfigRegistry | None:
+        return (
+            None if user_config.model.configs is None else ModelConfigRegistry(model_configs=user_config.model.configs)
+        )
+
+    def _load_legacy(self) -> ModelConfigRegistry | None:
         """Load model configuration from file."""
-        if not self.exists():
+        if not self.config_file.exists():
             return None
 
         try:
@@ -76,7 +84,7 @@ class ModelRepository(ConfigRepository[ModelConfigRegistry]):
         except Exception:
             return None
 
-    def save(self, config: ModelConfigRegistry) -> None:
+    def _save_legacy(self, config: ModelConfigRegistry) -> None:
         """Save model configuration to file."""
         config_dict = config.model_dump(mode="json", exclude_none=True)
         save_config_file(self.config_file, config_dict)
