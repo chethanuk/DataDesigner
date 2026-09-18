@@ -27,6 +27,8 @@ from data_designer.config.run_config import RunConfig
 from data_designer.engine.models.clients.adapters.openai_compatible import OpenAICompatibleClient
 from data_designer.engine.models.request_admission.resources import RequestDomain, RequestResourceKey
 from data_designer.engine.observability import (
+    FilteringRequestAdmissionEventSink,
+    FilteringSchedulerAdmissionEventSink,
     RequestAdmissionEvent,
     RuntimeCorrelation,
     SchedulerAdmissionEvent,
@@ -72,6 +74,8 @@ def _active_request_total(runtime: OpenTelemetryRuntime) -> float:
 
 
 def test_runtime_only_accepts_exported_events_during_active_runs(runtime: OpenTelemetryRuntime) -> None:
+    assert isinstance(runtime, FilteringSchedulerAdmissionEventSink)
+    assert isinstance(runtime, FilteringRequestAdmissionEventSink)
     assert not runtime.accepts_scheduler_event("scheduler_job_started")
     assert not runtime.accepts_request_event("model_request_started")
 

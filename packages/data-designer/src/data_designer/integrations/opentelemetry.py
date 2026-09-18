@@ -12,7 +12,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from data_designer.config.version import get_library_version
 from data_designer.engine.observability import (
@@ -23,6 +23,13 @@ from data_designer.engine.observability import (
     SchedulerAdmissionEventKind,
     runtime_correlation_provider,
 )
+
+if TYPE_CHECKING:
+    from wsgiref.simple_server import WSGIServer
+
+    from opentelemetry.metrics import Counter, Histogram, ObservableGauge, UpDownCounter
+    from opentelemetry.sdk.metrics import MeterProvider
+    from prometheus_client import CollectorRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -84,18 +91,18 @@ class OpenTelemetryRuntime:
         self._active_request_attempts: dict[tuple[str, str], dict[str, str]] = {}
         self._initialized = False
         self._port: int | None = None
-        self._registry: Any = None
-        self._meter_provider: Any = None
-        self._server: Any = None
+        self._registry: CollectorRegistry | None = None
+        self._meter_provider: MeterProvider | None = None
+        self._server: WSGIServer | None = None
         self._server_thread: threading.Thread | None = None
         self._start_http_server: Callable[..., Any] | None = None
-        self._create_duration: Any = None
-        self._dataset_records: Any = None
-        self._dataset_progress: Any = None
-        self._scheduler_events: Any = None
-        self._active_model_requests: Any = None
-        self._request_duration: Any = None
-        self._log_records: Any = None
+        self._create_duration: Histogram | None = None
+        self._dataset_records: Counter | None = None
+        self._dataset_progress: ObservableGauge | None = None
+        self._scheduler_events: Counter | None = None
+        self._active_model_requests: UpDownCounter | None = None
+        self._request_duration: Histogram | None = None
+        self._log_records: Counter | None = None
         self._log_handler: logging.Handler | None = None
 
     @property
