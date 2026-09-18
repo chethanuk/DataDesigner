@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 WORKFLOWS_DIR = Path(__file__).resolve().parents[4] / ".github" / "workflows"
 
 
@@ -67,3 +69,33 @@ def test_devnotes_publish_does_not_reuse_notebook_artifacts() -> None:
     assert 'gh release download "$release_tag"' in workflow
     assert "run: make -f ../workflow/Makefile check-fern-published-docs" in workflow
     assert "run: make check-fern-docs\n" not in workflow
+
+
+def _load_workflow(name: str) -> dict:
+    return yaml.safe_load((WORKFLOWS_DIR / name).read_text())
+
+
+def test_docs_preview_pr_workflow_holds_no_deploy_credentials() -> None:
+    text = (WORKFLOWS_DIR / "docs-preview.yml").read_text()
+    workflow = yaml.safe_load(text)
+
+    assert "secrets." not in text
+    for job in workflow["jobs"].values():
+        assert set(job["permissions"].values()) <= {"read"}
+
+
+def test_docs_preview_deploy_publishes_the_preview_build_artifact() -> None:
+    build = _load_workflow("docs-preview.yml")
+    deploy_text = (WORKFLOWS_DIR / "docs-preview-deploy.yml").read_text()
+    deploy = yaml.safe_load(deploy_text)
+
+    # PyYAML (YAML 1.1) reads the `on:` key as True.
+    assert deploy[True]["workflow_run"] == {"workflows": [build["name"]], "types": ["completed"]}
+    job_if = deploy["jobs"]["deploy"]["if"]
+    assert "github.event.workflow_run.event == 'pull_request'" in job_if
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in job_if
+    upload = next(
+        s for s in build["jobs"]["build"]["steps"] if s.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert f"--name {upload['with']['name']} " in deploy_text
+    assert "FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}" in deploy_text
