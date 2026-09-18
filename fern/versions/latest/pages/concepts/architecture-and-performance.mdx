@@ -108,16 +108,18 @@ For a given model, async request concurrency is bounded by:
 ```python
 concurrent_requests = min(
     active_ready_model_cells,  # Ready cells across active row groups
-    current_admission_limit,   # AIMD-managed limit (≤ max_parallel_requests)
-    max_in_flight_tasks,       # Global scheduler task-lease ceiling
+    task_admission_slots,      # Task leases: max_in_flight_tasks overall, max_parallel_requests per model
+    current_admission_limit,   # AIMD-managed request limit (≤ max_parallel_requests)
 )
 ```
+
+Work is admitted in two stages. **Task admission** decides when a ready cell may start: every task holds a lease against the global `max_in_flight_tasks` budget, and a task for a model column also holds one of `max_parallel_requests` task slots for its model. **Request admission** then decides when each API call may go out. A task keeps its lease while it waits for request admission. See [Async Scheduling](/concepts/async-scheduling) for how the stages fit together.
 
 `active_ready_model_cells` depends on the column DAG and the active row-group horizon. Each active row group contributes up to `buffer_size` rows per ready model column. Other work may consume part of the global `max_in_flight_tasks` budget. `max_parallel_requests` sets the **per-model ceiling**. The actual limit (`current_admission_limit`) is managed at runtime by an AIMD (Additive Increase / Multiplicative Decrease) request-admission controller that reacts to rate-limit signals from the inference server:
 
 - **During optional startup ramp**: when `startup_ramp_seconds` is greater than 0, a new request domain starts at one concurrent request and increases linearly toward `max_parallel_requests` over that duration.
 - **On the first 429 in a burst**: the limit is reduced by a configurable factor (default: 25% reduction) and a cooldown is applied. Further 429s from already in-flight requests in the same burst do not reduce the limit again — they release their permits and hold the limit steady.
-- **After consecutive successes**: the limit increases by 1 (by default) until it reaches the ceiling or a stabilized rate-limit threshold.
+- **After consecutive successes**: the limit increases by 1 (by default) until it is back at `max_parallel_requests`.
 
 This means Data Designer automatically finds the right concurrency level for your server without manual tuning.
 
@@ -332,7 +334,7 @@ designer.set_run_config(run_config)
 How it works in practice
 When a model endpoint returns HTTP 429, the controller reduces the concurrency limit for that model and pauses briefly. After enough successful releases, it begins ramping back up. If the server rate-limits again, the limit is reduced again and recovery resumes once the server catches up.
 
-You can observe this in the logs — look for messages like `concurrency reduced from X → Y` and `concurrency increased from X → Y`.
+Limit changes are not written to the log. With `display_tui=True`, the throughput chart marks each rate-limit signal. For a record you can read after the run, set `write_scheduler_events=True` and check `diagnostics.request_pressure` in the `scheduler_health_snapshot` events of `scheduler_events.jsonl`, which shows each model's current limit, maximum, waiters, and cooldown. See [Async Scheduling](/concepts/async-scheduling#telemetry-which-layer-is-limiting).
 </Tip>
 
 ---
@@ -362,7 +364,7 @@ designer.set_run_config(run_config)
 
 ## Async Engine
 
-The async engine is the execution path. It dispatches work at the cell level rather than the column level, so independent columns overlap in time and per-(provider, model) AIMD pools tune themselves independently. See the [Async All the Way Down](/dev-notes/async-all-the-way-down) dev note for the full architecture.
+The async engine is the execution path. It dispatches work at the cell level rather than the column level, so independent columns overlap in time and the AIMD limit for each provider, model, and request type adjusts on its own. See [Async Scheduling](/concepts/async-scheduling) for the full architecture.
 
 ### Per-model timeouts drive every deadline
 
@@ -452,8 +454,8 @@ Prometheus pull is metrics-only: `data_designer.log.records` counts safe log met
 
 | Problem | Symptom | Solution |
 |---------|---------|----------|
-| **Low throughput** | Low GPU utilization | Increase `max_parallel_requests` and/or `buffer_size`. If request admission has reduced concurrency after earlier 429s (check logs for "concurrency reduced" messages), the server may need more capacity or you can wait for AIMD recovery. |
-| **Frequent 429 → recovery cycles** | Logs show repeated concurrency drops and ramp-ups | The `max_parallel_requests` ceiling is above the server's sustained capacity. This is handled automatically, but you can lower the ceiling to reduce the sawtooth or tune `multiplicative_decrease_factor` / `successes_until_increase`. |
+| **Low throughput** | Low GPU utilization | Increase `max_parallel_requests` and/or `buffer_size`. If request admission has reduced concurrency after earlier 429s (check `request_pressure` in `scheduler_events.jsonl`), the server may need more capacity or you can wait for AIMD recovery. |
+| **Frequent 429 → recovery cycles** | Repeated rate-limit markers in the TUI, or `current_limit` repeatedly below its maximum in `scheduler_events.jsonl` | The `max_parallel_requests` ceiling is above the server's sustained capacity. This is handled automatically, but you can lower the ceiling to reduce the sawtooth or tune `multiplicative_decrease_factor` / `successes_until_increase`. |
 | **Long tail of slow generations** | Most records fast, few very slow | Reduce `max_conversation_restarts`, simplify schemas, improve prompts |
 | **Multi-model idle periods** | One model busy, others idle | Reduce `buffer_size` for faster cycling, or consolidate models |
 | **Memory errors** | OOM crashes | Reduce `buffer_size` and `max_parallel_requests` |
@@ -466,13 +468,14 @@ Prometheus pull is metrics-only: `data_designer.log.records` counts safe log met
 1. **Start with defaults** for initial development — AIMD handles rate-limit adaptation automatically
 2. **Profile your workload**: How many LLM columns? How many records? What models?
 3. **Identify bottleneck**: Low GPU util → increase `max_parallel_requests` (AIMD will self-correct if you overshoot). Memory issues → decrease `buffer_size`. Long tails → tune retry settings.
-4. **Check request-admission logs**: Look for "concurrency reduced" / "concurrency increased" messages to understand whether rate limits are the bottleneck
+4. **Check request admission**: Turn on `write_scheduler_events` and read `request_pressure` in `scheduler_events.jsonl` to see whether rate limits are the bottleneck
 5. **Iterate**: Make one change at a time, measure impact before next change
 
 ---
 
 ## Related Documentation
 
+- [Async Scheduling](/concepts/async-scheduling): Task admission, request admission, and scheduler telemetry
 - [Deployment Options: Library vs. Microservice](/concepts/deployment-options): Choosing between library and microservice
 - [Model Configuration](/concepts/models/model-configs): Complete model settings reference
 - [Inference Parameters](/concepts/models/inference-parameters): Detailed parameter reference
