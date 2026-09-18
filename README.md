@@ -113,7 +113,7 @@ preview.display_sample_record()
 
 Data Designer documentation is available at [docs.nvidia.com/nemo/datadesigner](https://docs.nvidia.com/nemo/datadesigner/).
 
-Contributors should edit docs prose under `fern/`. Tutorial notebook source remains in `docs/notebook_source/*.py`; generated notebooks and Fern artifacts are not the source of truth. The legacy MkDocs archive remains available on GitHub Pages for releases `0.5.7` and older.
+Contributors should edit docs prose under `fern/`. Tutorial notebook source lives in `fern/notebook_source/*.py`; generated notebooks and Fern artifacts are not the source of truth. The legacy MkDocs archive remains available on GitHub Pages for releases `0.5.7` and older.
 
 ### 🔧 Configure models via CLI
 

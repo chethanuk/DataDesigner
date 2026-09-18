@@ -225,13 +225,13 @@ Recipe page: [Document Review Gate](/recipes/workflow-chaining/document-review-g
 Script:
 
 ```text
-docs/assets/recipes/workflow_chaining/document_review_gate.py
+fern/assets/recipes/workflow_chaining/document_review_gate.py
 ```
 
 It writes runtime-generated images, intermediate parquet files, reviewed parquet files, and final outputs under `--artifact-path`. Keep those artifacts out of the repo. From the repo root with the dev environment active:
 
 ```bash
-.venv/bin/python docs/assets/recipes/workflow_chaining/document_review_gate.py \
+.venv/bin/python fern/assets/recipes/workflow_chaining/document_review_gate.py \
   --artifact-path /tmp/datadesigner-workflow-chaining \
   --num-records 12 \
   --overwrite

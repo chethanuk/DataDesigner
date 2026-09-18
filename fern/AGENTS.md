@@ -13,8 +13,8 @@ This folder contains the Fern docs site for NeMo Data Designer. Use `fern/README
 ## Generated Artifacts
 
 - `make generate-fern-notebooks` creates gitignored notebook files in `fern/components/notebooks/`.
-- `docs/notebook_source/*.py` is the notebook source of truth.
-- `docs/colab_notebooks/` is only for Colab links, not Fern input.
+- `fern/notebook_source/*.py` is the notebook source of truth.
+- `fern/colab_notebooks/` is only for Colab links, not Fern input.
 
 ## Versioning Model
 
