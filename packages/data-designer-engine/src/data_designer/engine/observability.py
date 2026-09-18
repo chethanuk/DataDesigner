@@ -219,6 +219,16 @@ class SchedulerAdmissionEventSink(Protocol):
     def emit_scheduler_event(self, event: SchedulerAdmissionEvent) -> None: ...
 
 
+@runtime_checkable
+class FilteringSchedulerAdmissionEventSink(SchedulerAdmissionEventSink, Protocol):
+    """Scheduler sink that declares which event kinds it wants.
+
+    Optional: a sink that does not implement it receives every event kind.
+    """
+
+    def accepts_scheduler_event(self, event_kind: SchedulerAdmissionEventKind) -> bool: ...
+
+
 class JsonlSchedulerEventSink:
     """Append scheduler events as newline-delimited JSON from a single writer.
 
@@ -273,6 +283,8 @@ def scheduler_event_sink_accepts(
     """Return whether a scheduler sink wants an event, defaulting to all events."""
     if sink is None:
         return False
+    # The contract is FilteringSchedulerAdmissionEventSink. This runs once per event, so it stays a
+    # getattr rather than an isinstance against that Protocol, which is several times more expensive.
     accepts = getattr(sink, "accepts_scheduler_event", None)
     if accepts is None:
         return True
@@ -310,8 +322,19 @@ def fanout_scheduler_event_sinks(
     return _FanoutSchedulerEventSink(active_sinks)
 
 
+@runtime_checkable
 class RequestAdmissionEventSink(Protocol):
     def emit_request_event(self, event: RequestAdmissionEvent) -> None: ...
+
+
+@runtime_checkable
+class FilteringRequestAdmissionEventSink(RequestAdmissionEventSink, Protocol):
+    """Request sink that declares which event kinds it wants.
+
+    Optional: a sink that does not implement it receives every event kind.
+    """
+
+    def accepts_request_event(self, event_kind: RequestAdmissionEventKind) -> bool: ...
 
 
 def request_event_sink_accepts(
@@ -321,6 +344,8 @@ def request_event_sink_accepts(
     """Return whether a request sink wants an event, defaulting to all events."""
     if sink is None:
         return False
+    # The contract is FilteringRequestAdmissionEventSink. This runs once per event, so it stays a
+    # getattr rather than an isinstance against that Protocol, which is several times more expensive.
     accepts = getattr(sink, "accepts_request_event", None)
     if accepts is None:
         return True
