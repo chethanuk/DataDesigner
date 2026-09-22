@@ -1,0 +1,153 @@
+name: Fern docs preview deploy
+
+# Publishes the hosted preview built by "Fern docs preview" (docs-preview.yml).
+# That workflow runs PR code with read-only permissions and no secrets; this one
+# holds DOCS_FERN_TOKEN and never checks out or runs PR code. The artifact is
+# still PR-written data: its PR number must match the event, and page paths must
+# stay inside it; the docs content itself is trusted-author input (same-repo PRs
+# only; fork PRs never deploy). workflow_run only fires for the copy of this file
+# on the default branch.
+on: # zizmor: ignore[dangerous-triggers] never checks out or runs PR code; artifact checks below
+  workflow_run:
+    workflows: ["Fern docs preview"]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: fern-docs-preview-deploy-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Same-repo PRs only (read from the event, not the artifact). Fork PRs get
+    # build and check only. A failed build still updates the comment.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download preview artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run download "$RUN_ID" --repo "$REPOSITORY" --name fern-docs-preview --dir fern-docs-preview
+
+      # The artifact is written by PR code, so its PR number must match one the
+      # event (trusted) associates with the build run.
+      - name: Read PR number
+        id: metadata
+        env:
+          RUN_PR_NUMBERS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+        run: |
+          pr_number=$(cat fern-docs-preview/fern-preview-metadata/pr_number)
+          if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid PR number in preview artifact: $pr_number"
+            exit 1
+          fi
+          if [[ " $RUN_PR_NUMBERS " != *" $pr_number "* ]]; then
+            echo "::error::PR #$pr_number from the artifact is not associated with this run (run PRs: ${RUN_PR_NUMBERS:-none})."
+            exit 1
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      # docs config from a same-repo PR is trusted-author input (those authors
+      # already have write access). This guard only stops page `path:` values in
+      # the artifact's YAML (and symlinks) from pointing Fern outside the
+      # artifact, e.g. at /proc/self/environ. MDX `src` and `$ref` are not checked.
+      - name: Check page paths stay inside the artifact
+        if: github.event.workflow_run.conclusion == 'success'
+        id: paths
+        continue-on-error: true
+        working-directory: fern-docs-preview/fern-preview/fern
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+          root = os.path.realpath(".")
+          bad = []
+          for d, dirs, files in os.walk(root):
+              bad += [f"symlink: {os.path.join(d, n)}" for n in dirs + files if os.path.islink(os.path.join(d, n))]
+              for n in files:
+                  if not n.endswith((".yml", ".yaml")):
+                      continue
+                  f = os.path.join(d, n)
+                  query = '[.. | select(tag == "!!map" and has("path")) | .path]'
+                  out = subprocess.run(["yq", "-o=json", "-I=0", query, f], check=True, capture_output=True, text=True).stdout
+                  for p in (p for line in out.splitlines() for p in json.loads(line)):
+                      # Relative paths may resolve from the YAML file or the fern/ root; check both.
+                      for base in (d, root):
+                          if os.path.commonpath([root, os.path.realpath(os.path.join(base, str(p)))]) != root:
+                              bad.append(f"{os.path.relpath(f, root)}: path {p!r} resolves outside the artifact")
+          for b in bad:
+              print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+
+      # The Fern CLI version comes from the default branch, not the artifact. Its
+      # own step keeps GH_TOKEN out of the environment Fern runs in.
+      - name: Read Fern version
+        if: github.event.workflow_run.conclusion == 'success'
+        id: fern-version
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          fern_version=$(gh api -H "Accept: application/vnd.github.raw" "repos/$REPOSITORY/contents/fern/fern.config.json" | jq -r .version)
+          if [[ ! "$fern_version" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]; then
+            echo "::error::Invalid Fern version in fern.config.json: $fern_version"
+            exit 1
+          fi
+          echo "version=$fern_version" >> "$GITHUB_OUTPUT"
+
+      # Fern is installed outside the artifact so a PR-supplied .npmrc or
+      # node_modules is never used. FERN_NO_VERSION_REDIRECTION stops the CLI
+      # re-launching itself at the version in the artifact's fern.config.json.
+      - name: Deploy Fern preview
+        if: steps.paths.outcome == 'success' && steps.fern-version.outcome == 'success'
+        id: fern-preview
+        continue-on-error: true
+        env:
+          FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
+          FERN_NO_VERSION_REDIRECTION: "true"
+          FERN_VERSION: ${{ steps.fern-version.outputs.version }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+        run: |
+          if [ -z "$FERN_TOKEN" ]; then
+            echo "::error::DOCS_FERN_TOKEN secret is required to publish Fern preview docs."
+            exit 1
+          fi
+
+          fern_cli="$RUNNER_TEMP/fern-cli"
+          npm install --prefix "$fern_cli" --no-save --no-audit --no-fund --ignore-scripts "fern-api@$FERN_VERSION"
+
+          cd fern-docs-preview/fern-preview/fern
+          "$fern_cli/node_modules/.bin/fern" generate --docs --preview --id "pr-$PR_NUMBER" --force --no-prompt
+
+          echo "url=https://nvidia-preview-pr-$PR_NUMBER.docs.buildwithfern.com/nemo/datadesigner" >> "$GITHUB_OUTPUT"
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4
+        id: find-comment
+        with:
+          issue-number: ${{ steps.metadata.outputs.pr_number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "<!-- docs-preview -->"
+
+      - name: Post or update PR comment
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ steps.metadata.outputs.pr_number }}
+          edit-mode: replace
+          body: |
+            <!-- docs-preview -->
+            **Fern preview:** ${{ steps.fern-preview.outcome == 'success' && steps.fern-preview.outputs.url || format('Fern preview failed or skipped; see the [build run]({0}) and [deploy run]({1}/{2}/actions/runs/{3}) logs.', github.event.workflow_run.html_url, github.server_url, github.repository, github.run_id) }}
+
+            > Fern previews include the `docs-website` version archive with PR changes synced into latest. Notebook tutorials are rendered without execution outputs in previews.
