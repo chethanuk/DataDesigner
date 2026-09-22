@@ -93,7 +93,7 @@ venv.bak/
 fern/notebooks/
 fern/notebook_source/*.ipynb
 fern/notebook_source/*.csv
-fern/notebook_source/artifacts/
+fern/**/artifacts/
 
 tests_e2e/uv.lock
 
