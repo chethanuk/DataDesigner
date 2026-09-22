@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECIPE_PATH = REPO_ROOT / "docs" / "assets" / "recipes" / "workflow_chaining" / "document_review_gate.py"
+RECIPE_PATH = REPO_ROOT / "fern" / "assets" / "recipes" / "workflow_chaining" / "document_review_gate.py"
 SPEC = importlib.util.spec_from_file_location("document_review_gate", RECIPE_PATH)
 assert SPEC is not None
 document_review_gate = importlib.util.module_from_spec(SPEC)

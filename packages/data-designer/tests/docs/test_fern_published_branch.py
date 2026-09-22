@@ -8,6 +8,8 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 SCRIPT_PATH = Path(__file__).resolve().parents[4] / "fern" / "scripts" / "fern-published-branch.py"
 
 
@@ -200,3 +202,70 @@ redirects:
     assert (
         published_root / "fern" / "versions" / "v0.6.0" / "pages" / "devnotes" / "posts" / "released-note.mdx"
     ).read_text() == "# Released"
+
+
+REPO_BLOB_MAIN = "https://github.com/NVIDIA-NeMo/DataDesigner/blob/main/"
+COLAB_BLOB_MAIN = "https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner/blob/main/"
+
+
+def seed_minimal_publish_trees(source_root: Path, published_root: Path) -> None:
+    docs_yml = "versions:\n- display-name: latest\n  path: versions/latest.yml\n  slug: latest\n"
+    latest_nav = """navigation:
+  - section: Recipes
+    contents: []
+  - section: Dev Notes
+    contents: []
+"""
+    for root in (source_root, published_root):
+        write_text(root / "fern" / "docs.yml", docs_yml)
+        write_text(root / "fern" / "fern.config.json", '{"organization": "nvidia", "version": "5.41.1"}\n')
+        write_text(root / "fern" / "versions" / "latest.yml", latest_nav)
+
+
+@pytest.mark.parametrize(
+    ("published_link", "expected_link"),
+    [
+        pytest.param(
+            COLAB_BLOB_MAIN + "docs/" + "colab_notebooks/1-the-basics.ipynb",
+            COLAB_BLOB_MAIN + "fern/colab_notebooks/1-the-basics.ipynb",
+            id="colab-badge",
+        ),
+        pytest.param(
+            REPO_BLOB_MAIN + "docs/" + "assets/recipes/qa_and_chat/multi_turn_chat.py",
+            REPO_BLOB_MAIN + "fern/assets/recipes/qa_and_chat/multi_turn_chat.py",
+            id="recipe-download",
+        ),
+        pytest.param(
+            REPO_BLOB_MAIN + "docs/" + "notebook_source/1-the-basics.py",
+            REPO_BLOB_MAIN + "fern/notebook_source/1-the-basics.py",
+            id="notebook-source",
+        ),
+        pytest.param(
+            "https://github.com/NVIDIA-NeMo/DataDesigner/blob/v0.9.2/docs/" + "assets/recipes/x.py",
+            "https://github.com/NVIDIA-NeMo/DataDesigner/blob/v0.9.2/docs/" + "assets/recipes/x.py",
+            id="tag-pinned-link-unchanged",
+        ),
+        pytest.param(
+            REPO_BLOB_MAIN + "docs/concepts/columns.md",
+            REPO_BLOB_MAIN + "docs/concepts/columns.md",
+            id="unmoved-docs-path-unchanged",
+        ),
+    ],
+)
+def test_publishing_retargets_links_to_moved_support_files(
+    tmp_path: Path, published_link: str, expected_link: str
+) -> None:
+    module = load_script_module()
+    source_root = tmp_path / "source"
+    published_root = tmp_path / "published"
+    seed_minimal_publish_trees(source_root, published_root)
+    frozen_page = published_root / "fern" / "versions" / "v0.9.2" / "pages" / "notebooks" / "1-the-basics.mdx"
+    latest_page = published_root / "fern" / "versions" / "latest" / "pages" / "concepts" / "columns.mdx"
+    for page in (frozen_page, latest_page):
+        write_text(page, f"[Open]({published_link})\n")
+
+    assert module.patch_devnotes(patch_args(source_root, published_root)) == 0
+    assert module.patch_devnotes(patch_args(source_root, published_root)) == 0
+
+    for page in (frozen_page, latest_page):
+        assert page.read_text() == f"[Open]({expected_link})\n"

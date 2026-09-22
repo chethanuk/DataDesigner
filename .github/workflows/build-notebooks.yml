@@ -40,7 +40,7 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Compute notebook cache context
-        run: echo "NOTEBOOK_CACHE_CONTEXT=${NOTEBOOK_EXECUTION_PROFILE}:${{ hashFiles('Makefile', 'docs/scripts/build_notebooks_cached.sh', 'uv.lock', 'packages/data-designer-config/src/**/*.py', 'packages/data-designer-engine/src/**/*.py', 'packages/data-designer/src/**/*.py') }}" >> "$GITHUB_ENV"
+        run: echo "NOTEBOOK_CACHE_CONTEXT=${NOTEBOOK_EXECUTION_PROFILE}:${{ hashFiles('Makefile', 'fern/scripts/build_notebooks_cached.sh', 'uv.lock', 'packages/data-designer-config/src/**/*.py', 'packages/data-designer-engine/src/**/*.py', 'packages/data-designer/src/**/*.py') }}" >> "$GITHUB_ENV"
       - name: Install uv
         # Keep v8.1.0 until manual workflow dispatch is verified on newer releases.
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .notebook-cache
-          key: notebooks-${{ env.NOTEBOOK_EXECUTION_PROFILE }}-${{ hashFiles('docs/notebook_source/*.py', 'Makefile', 'docs/scripts/build_notebooks_cached.sh', 'uv.lock', 'packages/data-designer-config/src/**/*.py', 'packages/data-designer-engine/src/**/*.py', 'packages/data-designer/src/**/*.py') }}
+          key: notebooks-${{ env.NOTEBOOK_EXECUTION_PROFILE }}-${{ hashFiles('fern/notebook_source/*.py', 'Makefile', 'fern/scripts/build_notebooks_cached.sh', 'uv.lock', 'packages/data-designer-config/src/**/*.py', 'packages/data-designer-engine/src/**/*.py', 'packages/data-designer/src/**/*.py') }}
           restore-keys: |
             notebooks-${{ env.NOTEBOOK_EXECUTION_PROFILE }}-
       - name: Seed cache from last successful artifact
@@ -71,7 +71,7 @@ jobs:
           }
 
           cache_complete() {
-            for src in docs/notebook_source/*.py; do
+            for src in fern/notebook_source/*.py; do
               name="$(basename "$src" .py)"
               fingerprint="$(fingerprint_for "$src")"
               if [ ! -f ".notebook-cache/${name}.ipynb" ] \
@@ -107,7 +107,7 @@ jobs:
               continue
             fi
 
-            for src in docs/notebook_source/*.py; do
+            for src in fern/notebook_source/*.py; do
               name="$(basename "$src" .py)"
               fingerprint="$(fingerprint_for "$src")"
               if [ -f ".notebook-cache/${name}.ipynb" ] \
@@ -144,7 +144,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: notebooks
-          path: docs/notebooks
+          path: fern/notebooks
       - name: Upload notebook source hashes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

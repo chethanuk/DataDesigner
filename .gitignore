@@ -90,10 +90,10 @@ venv.bak/
 /scripts/benchmarks/generate_async_scheduling_idle_report.py
 /scripts/benchmarks/run_async_scheduling_idle_regression.py
 
-docs/notebooks/
-docs/notebook_source/*.ipynb
-docs/notebook_source/*.csv
-docs/**/artifacts/
+fern/notebooks/
+fern/notebook_source/*.ipynb
+fern/notebook_source/*.csv
+fern/**/artifacts/
 
 tests_e2e/uv.lock
 

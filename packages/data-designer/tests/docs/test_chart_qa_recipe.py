@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECIPE_PATH = REPO_ROOT / "docs" / "assets" / "recipes" / "chart_qa" / "chart_qa.py"
+RECIPE_PATH = REPO_ROOT / "fern" / "assets" / "recipes" / "chart_qa" / "chart_qa.py"
 
 
 def _load_recipe() -> ModuleType:
