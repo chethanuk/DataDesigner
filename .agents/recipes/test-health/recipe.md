@@ -69,7 +69,7 @@ For each source module, check if a corresponding test file exists. Flag:
 
 **Track the ratio**: N test files / M source files. Compare against baseline.
 
-Focus on `packages/*/src/` only. Skip `scripts/`, `docs/`, and other
+Focus on `packages/*/src/` only. Skip `scripts/`, `fern/`, and other
 non-package code.
 
 ### 2. Hollow test detection

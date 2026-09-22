@@ -11,7 +11,7 @@ Data Designer docs are Fern-first:
 - Keep generated Fern notebook artifacts gitignored.
 - Keep the legacy MkDocs `gh-pages` archive frozen for releases `0.5.7` and older.
 
-Everything the docs build reads lives in this folder:
+Every docs source and support file lives in this folder:
 
 | Path | Kind |
 |---|---|
