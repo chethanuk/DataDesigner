@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[4] / ".github" / "workflows"
@@ -109,3 +113,64 @@ def test_docs_preview_deploy_does_not_trust_pr_code() -> None:
     # PR number from the artifact must match the event; Fern must not re-launch at the artifact's version.
     assert "github.event.workflow_run.pull_requests.*.number" in deploy_text
     assert 'FERN_NO_VERSION_REDIRECTION: "true"' in deploy_text
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+@pytest.mark.skipif(shutil.which("yq") is None, reason="the guard parses YAML with yq (preinstalled on GitHub runners)")
+@pytest.mark.parametrize(
+    ("files", "symlink", "allowed"),
+    [
+        pytest.param(
+            {"docs.yml": "navigation:\n  - page: Home\n    path: ./pages/index.mdx\n"}, False, True, id="in-tree"
+        ),
+        pytest.param(
+            {"versions/v.yml": "navigation:\n  - path: ../pages/index.mdx\n"}, False, False, id="dotdot-from-root"
+        ),
+        pytest.param({"docs.yml": "navigation:\n  - path: ../../outside.mdx\n"}, False, False, id="dotdot"),
+        pytest.param({"docs.yml": "navigation:\n  - path: /proc/self/environ\n"}, False, False, id="absolute"),
+        pytest.param({"docs.yml": "x: {path: '/etc/passwd'}\n"}, False, False, id="flow-style"),
+        pytest.param({"docs.yml": "navigation:\n  - path: ./pages/index.mdx\n"}, True, False, id="symlink"),
+    ],
+)
+def test_docs_preview_deploy_rejects_paths_outside_the_artifact(
+    tmp_path: Path, files: dict[str, str], symlink: bool, allowed: bool
+) -> None:
+    steps = _load_workflow("docs-preview-deploy.yml")["jobs"]["deploy"]["steps"]
+    guard = next(s for s in steps if s.get("id") == "paths")
+    fern = tmp_path / "fern"
+    _write(fern / "pages" / "index.mdx", "# Home\n")
+    for name, text in files.items():
+        _write(fern / name, text)
+    if symlink:
+        (fern / "pages" / "env.mdx").symlink_to("/proc/self/environ")
+    script = tmp_path / "guard.py"
+    script.write_text(guard["run"])
+
+    result = subprocess.run([sys.executable, str(script)], cwd=fern, capture_output=True, text=True)
+
+    assert (result.returncode == 0) == allowed, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(shutil.which("yq") is None, reason="the guard parses YAML with yq (preinstalled on GitHub runners)")
+def test_docs_preview_deploy_path_guard_accepts_the_real_docs_tree() -> None:
+    steps = _load_workflow("docs-preview-deploy.yml")["jobs"]["deploy"]["steps"]
+    guard = next(s for s in steps if s.get("id") == "paths")
+
+    result = subprocess.run(
+        [sys.executable, "-c", guard["run"]], cwd=WORKFLOWS_DIR.parents[1] / "fern", capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_docs_preview_deploy_keeps_github_token_away_from_fern() -> None:
+    steps = _load_workflow("docs-preview-deploy.yml")["jobs"]["deploy"]["steps"]
+    deploy = next(s for s in steps if s.get("id") == "fern-preview")
+
+    assert "generate --docs --preview" in deploy["run"]
+    assert not any("github.token" in str(v) for v in deploy["env"].values())
+    assert "GH_TOKEN" not in deploy["env"]

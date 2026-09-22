@@ -2,9 +2,12 @@ name: Fern docs preview deploy
 
 # Publishes the hosted preview built by "Fern docs preview" (docs-preview.yml).
 # That workflow runs PR code with read-only permissions and no secrets; this one
-# holds DOCS_FERN_TOKEN and never checks out or runs PR code. workflow_run only
-# fires for the copy of this file on the default branch.
-on: # zizmor: ignore[dangerous-triggers] never checks out PR code; artifact inputs are validated below
+# holds DOCS_FERN_TOKEN and never checks out or runs PR code. The artifact is
+# still PR-written data: its PR number must match the event, and page paths must
+# stay inside it; the docs content itself is trusted-author input (same-repo PRs
+# only; fork PRs never deploy). workflow_run only fires for the copy of this file
+# on the default branch.
+on: # zizmor: ignore[dangerous-triggers] never checks out or runs PR code; artifact checks below
   workflow_run:
     workflows: ["Fern docs preview"]
     types: [completed]
@@ -55,19 +58,65 @@ jobs:
           fi
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
-      # The Fern CLI version comes from the default branch, not the artifact, and is
-      # installed outside the artifact so a PR-supplied .npmrc or node_modules is
-      # never used. FERN_NO_VERSION_REDIRECTION stops the CLI re-launching itself
-      # at the version in the artifact's fern.config.json.
-      - name: Deploy Fern preview
+      # docs config from a same-repo PR is trusted-author input (those authors
+      # already have write access). This guard only stops page `path:` values in
+      # the artifact's YAML (and symlinks) from pointing Fern outside the
+      # artifact, e.g. at /proc/self/environ. MDX `src` and `$ref` are not checked.
+      - name: Check page paths stay inside the artifact
         if: github.event.workflow_run.conclusion == 'success'
+        id: paths
+        continue-on-error: true
+        working-directory: fern-docs-preview/fern-preview/fern
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+          root = os.path.realpath(".")
+          bad = []
+          for d, dirs, files in os.walk(root):
+              bad += [f"symlink: {os.path.join(d, n)}" for n in dirs + files if os.path.islink(os.path.join(d, n))]
+              for n in files:
+                  if not n.endswith((".yml", ".yaml")):
+                      continue
+                  f = os.path.join(d, n)
+                  query = '[.. | select(tag == "!!map" and has("path")) | .path]'
+                  out = subprocess.run(["yq", "-o=json", "-I=0", query, f], check=True, capture_output=True, text=True).stdout
+                  for p in (p for line in out.splitlines() for p in json.loads(line)):
+                      # Relative paths may resolve from the YAML file or the fern/ root; check both.
+                      for base in (d, root):
+                          if os.path.commonpath([root, os.path.realpath(os.path.join(base, str(p)))]) != root:
+                              bad.append(f"{os.path.relpath(f, root)}: path {p!r} resolves outside the artifact")
+          for b in bad:
+              print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+
+      # The Fern CLI version comes from the default branch, not the artifact. Its
+      # own step keeps GH_TOKEN out of the environment Fern runs in.
+      - name: Read Fern version
+        if: github.event.workflow_run.conclusion == 'success'
+        id: fern-version
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          fern_version=$(gh api -H "Accept: application/vnd.github.raw" "repos/$REPOSITORY/contents/fern/fern.config.json" | jq -r .version)
+          if [[ ! "$fern_version" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]; then
+            echo "::error::Invalid Fern version in fern.config.json: $fern_version"
+            exit 1
+          fi
+          echo "version=$fern_version" >> "$GITHUB_OUTPUT"
+
+      # Fern is installed outside the artifact so a PR-supplied .npmrc or
+      # node_modules is never used. FERN_NO_VERSION_REDIRECTION stops the CLI
+      # re-launching itself at the version in the artifact's fern.config.json.
+      - name: Deploy Fern preview
+        if: steps.paths.outcome == 'success' && steps.fern-version.outcome == 'success'
         id: fern-preview
         continue-on-error: true
         env:
           FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
           FERN_NO_VERSION_REDIRECTION: "true"
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
+          FERN_VERSION: ${{ steps.fern-version.outputs.version }}
           PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
         run: |
           if [ -z "$FERN_TOKEN" ]; then
@@ -75,19 +124,11 @@ jobs:
             exit 1
           fi
 
-          fern_version=$(gh api -H "Accept: application/vnd.github.raw" "repos/$REPOSITORY/contents/fern/fern.config.json" | jq -r .version)
-          if [[ ! "$fern_version" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]; then
-            echo "::error::Invalid Fern version in fern.config.json: $fern_version"
-            exit 1
-          fi
           fern_cli="$RUNNER_TEMP/fern-cli"
-          npm install --prefix "$fern_cli" --no-save --no-audit --no-fund --ignore-scripts "fern-api@$fern_version"
-
-          log_file="$RUNNER_TEMP/fern-preview.log"
+          npm install --prefix "$fern_cli" --no-save --no-audit --no-fund --ignore-scripts "fern-api@$FERN_VERSION"
 
           cd fern-docs-preview/fern-preview/fern
-          set -o pipefail
-          "$fern_cli/node_modules/.bin/fern" generate --docs --preview --id "pr-$PR_NUMBER" --force --no-prompt 2>&1 | tee "$log_file"
+          "$fern_cli/node_modules/.bin/fern" generate --docs --preview --id "pr-$PR_NUMBER" --force --no-prompt
 
           echo "url=https://nvidia-preview-pr-$PR_NUMBER.docs.buildwithfern.com/nemo/datadesigner" >> "$GITHUB_OUTPUT"
 
