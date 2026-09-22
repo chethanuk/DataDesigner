@@ -1,0 +1,156 @@
+---
+title: "Async Scheduling"
+description: ""
+---
+The async engine decides when work may run in two separate stages. **Task admission** decides when a ready cell or column task may start. **Request admission** decides when each model API call made by a running task may go out. This page explains both stages, the capacity limits around them, and how to tell from a run's telemetry which one is holding things back.
+
+Class names on this page are there to help you read diagnostics and source code. They are not settings or extension points. The settings you can change are `buffer_size`, `max_concurrent_row_groups`, `max_in_flight_tasks`, `max_parallel_requests`, and `RunConfig.request_admission`. [Architecture & Performance](/concepts/architecture-performance) covers how to tune most of them.
+
+---
+
+## Two Stages of Admission
+
+A task is one unit of dataset work: one cell of a cell-by-cell column, or one full-column batch. A task can make zero, one, or many model calls. A sampler makes none, an LLM column usually makes one per attempt, and a custom column decides at runtime. The scheduler cannot reserve model calls up front, so the two decisions are made at different times:
+
+1. **Task admission** runs when a task becomes ready. The task gets a scheduler lease or waits in the ready queue.
+2. **Request admission** runs each time a running task makes a model call. Every attempt, including a retry, gets its own request lease for the provider, model, and request type.
+
+A task keeps its task lease until it finishes, including any time it spends waiting for request admission. Neither stage reaches into the other: task admission only reads request-admission snapshots, and request admission knows nothing about tasks or row groups.
+
+```
+Ready cells (dependency graph, active row groups)
+  → FairTaskQueue            orders ready tasks across groups
+  → TaskAdmissionController  grants a task lease, or the task waits
+  → worker runs the column generator
+      → ModelRequestExecutor           one per model client; wraps each call attempt
+      → RequestAdmissionController     grants a request lease, or the call waits
+      → provider endpoint
+      → request lease released with the outcome (success, rate limited, error, ...)
+  → task lease released when the task completes, fails, or is cancelled
+```
+
+---
+
+## Capacity Layers
+
+Each layer answers a different question, and has its own owner and limit.
+
+| Layer | Owner | Set by | What it bounds |
+|-------|-------|--------|----------------|
+| Record window | Dataset builder | `buffer_size` | Records per row group, checkpoint size, and memory per row group |
+| Row-group admission | `AsyncTaskScheduler` | `max_concurrent_row_groups` (default 3) | Row groups in flight at once. The cap is fixed for the run. |
+| Task admission | `TaskAdmissionController` | `max_in_flight_tasks` (default 1024), plus `max_parallel_requests` per provider/model | Tasks that may hold a lease at once |
+| Request static cap | `AdaptiveRequestAdmissionController` | `max_parallel_requests` | Model calls in flight to one provider/model, summed over chat, embedding, and image calls |
+| Adaptive request limit | `AdaptiveRequestAdmissionController` | `RunConfig.request_admission` | The AIMD limit for one provider/model/request type, never above the static cap |
+| HTTP connection pool | Model client adapter | Derived: `max(32, 2 × max_parallel_requests)` | Socket reuse only. It does not limit concurrency. |
+
+If several model aliases point at the same provider and model, their `max_parallel_requests` values are merged by taking the smallest. The same smallest value is used for the provider/model task slots and for the request static cap.
+
+---
+
+## Task Admission
+
+Ready tasks are grouped by the resource they use and by the columns they produce. Local work (samplers, expressions, custom columns without models) forms one kind of group. A model-backed column, such as an LLM column, whose aliases all resolve to one provider/model endpoint forms a model group. A custom column with `model_aliases`, or a column whose aliases span several endpoints, forms a custom-model group.
+
+- **Fair ordering.** The ready queue is weighted fair queueing over groups. A large ready frontier for one column does not starve the others, so independent columns keep moving instead of running in waves.
+- **Leases.** Every task takes one unit of the `max_in_flight_tasks` budget. A task in a model group also takes one task slot for its provider/model, and there are `max_parallel_requests` of those slots. That stops tasks for one model from filling the whole scheduler while they queue for request admission. A custom-model group has no provider/model slot, so only fair sharing and `max_in_flight_tasks` bound it.
+- **Bounded borrowing.** Each model or custom-model group has a weighted fair share of a contended resource. A group running alone may borrow capacity nobody else is asking for. Borrowed capacity is tracked as debt, and a waiting peer group gets the next free slots until the debt is repaid. Local tasks only need a `max_in_flight_tasks` slot.
+- **Request-pressure advisory.** Before admitting a task for a provider/model that is cooling down after a 429, at its cap, or already has queued calls, the scheduler checks for another eligible group that is not under pressure. If it finds one, it runs that group's task instead. This only reads request-admission snapshots. It never takes or changes request leases.
+
+---
+
+## Request Admission
+
+Every model call goes through `ModelRequestExecutor`, which asks the request-admission controller for a lease, calls the provider, and releases the lease with the outcome. `ModelRequestExecutor` also owns retries for transient failures (HTTP 502, 503, 504, and connection errors): up to 3 retries with exponential backoff, and each retry is a new attempt that is admitted again. Request admission is always on in the engine, so HTTP-transport retries are turned off.
+
+The controller enforces two limits at once:
+
+- the **static cap**, `max_parallel_requests`, across all request types for a provider/model;
+- the **adaptive limit** for one provider/model/request type (`chat`, `embedding`, or `image`), managed by AIMD (Additive Increase / Multiplicative Decrease).
+
+The AIMD rules, with the `RequestAdmissionTuningConfig` field for each:
+
+- **Rate limited (HTTP 429).** The limit is multiplied by `multiplicative_decrease_factor` (default 0.75), and new calls for that provider/model/request type wait out a cooldown. The cooldown is the provider's `Retry-After` value when it sends one, otherwise `cooldown_seconds` (default 2.0). A burst of 429s from calls that were admitted before the cut lowers the limit only once.
+- **Recovery.** After `successes_until_increase` successful calls (default 25) outside a cooldown, the limit rises by `additive_increase_step` (default 1). It keeps rising until it is back at `max_parallel_requests`.
+- **Startup ramp.** When `startup_ramp_seconds` is greater than 0, each provider/model/request type starts at one concurrent call and climbs linearly to its cap over that time. The first 429 ends the ramp, and normal AIMD takes over.
+
+A 429 is not retried inside `ModelRequestExecutor`, so the rate-limit signal reaches request admission straight away. A task that fails on a rate limit or times out waiting for request admission counts as a retryable failure, and the scheduler runs it again in a salvage round. These failures are kept for another try after the cooldown even when the salvage rounds run out, so the rows are not dropped.
+
+---
+
+## Telemetry: Which Layer Is Limiting?
+
+The scheduler and request admission each emit their own events. Scheduler events carry correlation fields (`run_id`, `row_group`, `task_column`, `task_type`, the scheduling group kind and identity hash, and `task_execution_id`) under `captured_correlation`. Request-admission events are not written to a file: they drive the TUI markers and OpenTelemetry metrics below, and their state shows up in `scheduler_events.jsonl` as `request_pressure` snapshots. Events carry names, counts, and identifiers only, never prompts, completions, or row values.
+
+You can see them in three places:
+
+- **`scheduler_events.jsonl`.** Set `write_scheduler_events=True` on `RunConfig`, and a create run writes scheduler events to this file in the dataset directory. Preview runs do not write it. Every event includes a snapshot of task admission: limits, leased and available resources, and running tasks per group. The resource keys are `submission` (the `max_in_flight_tasks` budget), `llm_wait` (a cap on model-backed tasks, equal to `max_in_flight_tasks`; it is not the removed LLM-wait semaphore listed under [Renamed and Removed Names](#renamed-and-removed-names)), and `request:<provider>/<model>` (the provider/model task slots). `scheduler_health_snapshot` events also carry `diagnostics.request_pressure`, with the effective maximum, current limit, in-flight count, waiters, and cooldown for each provider/model/request type. The file can contain column, provider, model, and resource names, and every event is flushed to disk as it is written.
+- **Terminal UI.** With `display_tui=True`, the throughput chart puts a marker at each rate-limit or limit-decrease event.
+- **OpenTelemetry metrics.** `data_designer.model.request.active` and `gen_ai.client.operation.duration` come from the start and end of each model request. See [Local OpenTelemetry Metrics](/concepts/architecture-performance#local-opentelemetry-metrics).
+
+Reading `scheduler_events.jsonl`:
+
+| What you see | Likely limit |
+|--------------|--------------|
+| Health snapshots with `queued_total` near 0 and few `in_flight_tasks` while row groups are active | Dependency readiness: downstream columns are waiting on upstream ones |
+| Health snapshots with `active_row_groups` equal to `hard_cap_row_groups` | Row-group admission. Raising `max_concurrent_row_groups` exposes more ready work but uses more memory. |
+| `admission_blocked` events whose `reasons` show `no_capacity` | Task admission: `max_in_flight_tasks` (`submission`, `llm_wait`), or the provider/model task slots (`request:<provider>/<model>`) |
+| `group_capped` events, or `admission_blocked` with `borrow_debt` | Fair sharing: a group has used its share while another group is waiting |
+| `request_pressure` shows `waiters > 0`, `blocked: true`, or `current_limit` below `effective_max` | Request admission: the provider is rate limiting, or calls are at `max_parallel_requests` |
+| `request_pressure_advisory_skipped` events | The scheduler is working around a model under pressure by running other groups first |
+| Low request pressure but long request durations in `gen_ai.client.operation.duration` | The provider itself is slow |
+
+---
+
+## For Plugin Authors
+
+A column generator plugin can declare its broad resource shape by overriding `get_scheduling_metadata()` and returning a `SchedulingMetadata` from `data_designer.config`:
+
+- `SchedulingMetadata.local()` is the default. Use it for work that makes no model calls.
+- `SchedulingMetadata.model(provider_name, model_id, generation_kind, weight=...)` is for work against a single model endpoint. `generation_kind` must be `chat`, `embedding`, or `image`. Any other value gets no provider/model task slot and no request-pressure advisory.
+- `SchedulingMetadata.custom_model(plugin_namespace, resource_name, version, weight=...)` is for plugin-defined model resources.
+
+For `SchedulingMetadata.model`, `weight` is more than a fair-share weight. It becomes the provider/model task-slot count, and when several generators use the same provider and model, the smallest `weight` wins. It also caps the group's admitted tasks at 2 × `weight`. Set it to the model's `max_parallel_requests`, as the built-in generators do. A `weight=1` on a shared model limits every column on that model to one task slot.
+
+Generators built on the model registry derive this metadata from their model aliases, so most plugins do not need to override it. The metadata is static. It says nothing about queues, leases, AIMD state, or runtime pressure, and those scheduler internals are not a plugin API.
+
+---
+
+## Renamed and Removed Names
+
+Earlier releases used the throttle names below, and the dev notes from that period still use them. They are not current APIs.
+
+| Earlier name | Current name |
+|--------------|--------------|
+| `ThrottleManager` | `AdaptiveRequestAdmissionController` (request admission) |
+| `ThrottledModelClient` | `ModelRequestExecutor` |
+| `RunConfig.throttle` | `RunConfig.request_admission` |
+| `ThrottleConfig` | `RequestAdmissionTuningConfig` |
+| Submission and LLM-wait semaphore handoff in the scheduler | Task admission leases |
+
+`RunConfig.throttle` is still accepted. Setting it emits a `DeprecationWarning`, and the `ThrottleConfig` it holds is translated to `request_admission`. Setting both `throttle` and `request_admission` raises a `ValueError`.
+
+| `ThrottleConfig` field | `RequestAdmissionTuningConfig` field |
+|------------------------|--------------------------------------|
+| `reduce_factor` | `multiplicative_decrease_factor` |
+| `additive_increase` | `additive_increase_step` |
+| `success_window` | `successes_until_increase` |
+| `cooldown_seconds` | `cooldown_seconds` |
+| `rampup_seconds` | `startup_ramp_seconds` |
+| `ceiling_overshoot` | None. It is accepted and ignored. |
+
+Request admission does not log each limit change, so the `concurrency reduced` / `concurrency increased` log lines quoted in older posts are no longer written. Use the telemetry described above instead.
+
+---
+
+## For Maintainers
+
+- Internals: `architecture/dataset-builders.md` (scheduler, task admission, fair queue) and `architecture/models.md` (request admission, model clients) in the repository.
+- Design notes for this architecture live in [`plans/645/`](https://github.com/NVIDIA-NeMo/DataDesigner/tree/main/plans/645) (epic [#645](https://github.com/NVIDIA-NeMo/DataDesigner/issues/645)). Where they differ from the code, the code is current. For example, the scheduler can build an `AsyncCapacityPlan`, but no public API returns it yet.
+- `scripts/benchmarks/benchmark_bounded_borrow_admission.py --output-dir <dir>` simulates two task-admission scenarios with no model calls, runs each under strict-fair and bounded-borrow admission, and writes `bounded_borrow_admission_benchmark.json` and `.md` to a timestamped folder under `<dir>`. In the Comparisons table, the delta columns are bounded minus strict, so a negative *Peer first wait delta* means a peer group that arrives late gets capacity sooner, and a *Wall time delta* near zero means total throughput did not suffer. *Peer p95 wait reduction* is a ratio, (strict − bounded) / strict, so a positive value is an improvement.
+
+## Related Documentation
+
+- [Architecture & Performance](/concepts/architecture-performance): tuning `buffer_size`, `max_parallel_requests`, and request admission
+- [Async All the Way Down](/dev-notes/async-all-the-way-down): the dev note on the async engine launch (historical)
+- [Owning the Model Stack](/dev-notes/owning-the-model-stack): the dev note on the native model client and AIMD (historical)
