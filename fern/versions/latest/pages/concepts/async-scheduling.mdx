@@ -4,7 +4,7 @@ description: ""
 ---
 The async engine decides when work may run in two separate stages. **Task admission** decides when a ready cell or column task may start. **Request admission** decides when each model API call made by a running task may go out. This page explains both stages, the capacity limits around them, and how to tell from a run's telemetry which one is holding things back.
 
-Class names on this page are there to help you read diagnostics and source code. They are not settings or extension points. The settings you can change are the ones in [Architecture & Performance](/concepts/architecture-performance): `buffer_size`, `max_concurrent_row_groups`, `max_in_flight_tasks`, `max_parallel_requests`, and `RunConfig.request_admission`.
+Class names on this page are there to help you read diagnostics and source code. They are not settings or extension points. The settings you can change are `buffer_size`, `max_concurrent_row_groups`, `max_in_flight_tasks`, `max_parallel_requests`, and `RunConfig.request_admission`. [Architecture & Performance](/concepts/architecture-performance) covers how to tune most of them.
 
 ---
 
@@ -61,7 +61,7 @@ Ready tasks are grouped by the resource they use and by the columns they produce
 
 ## Request Admission
 
-Every model call goes through `ModelRequestExecutor`, which asks the request-admission controller for a lease, calls the provider, and releases the lease with the outcome. `ModelRequestExecutor` also owns retries for transient failures (HTTP 502, 503, 504, and connection errors): up to 3 retries with exponential backoff, and each retry is a new attempt that is admitted again. HTTP-transport retries are turned off while request admission is active.
+Every model call goes through `ModelRequestExecutor`, which asks the request-admission controller for a lease, calls the provider, and releases the lease with the outcome. `ModelRequestExecutor` also owns retries for transient failures (HTTP 502, 503, 504, and connection errors): up to 3 retries with exponential backoff, and each retry is a new attempt that is admitted again. Request admission is always on in the engine, so HTTP-transport retries are turned off.
 
 The controller enforces two limits at once:
 
@@ -74,7 +74,7 @@ The AIMD rules, with the `RequestAdmissionTuningConfig` field for each:
 - **Recovery.** After `successes_until_increase` successful calls (default 25) outside a cooldown, the limit rises by `additive_increase_step` (default 1). It keeps rising until it is back at `max_parallel_requests`.
 - **Startup ramp.** When `startup_ramp_seconds` is greater than 0, each provider/model/request type starts at one concurrent call and climbs linearly to its cap over that time. The first 429 ends the ramp, and normal AIMD takes over.
 
-A 429 is not retried inside `ModelRequestExecutor`, so the rate-limit signal reaches request admission straight away. A task that fails on a rate limit counts as a retryable failure, and the scheduler runs it again in a salvage round.
+A 429 is not retried inside `ModelRequestExecutor`, so the rate-limit signal reaches request admission straight away. A task that fails on a rate limit or times out waiting for request admission counts as a retryable failure, and the scheduler runs it again in a salvage round. These failures are kept for another try after the cooldown even when the salvage rounds run out, so the rows are not dropped.
 
 ---
 
@@ -84,7 +84,7 @@ The scheduler and request admission each emit their own events. Scheduler events
 
 You can see them in three places:
 
-- **`scheduler_events.jsonl`.** Set `write_scheduler_events=True` on `RunConfig`, and a create run writes scheduler events to this file in the dataset directory. Preview runs do not write it. Every event includes a snapshot of task admission: limits, leased and available resources, and running tasks per group. `scheduler_health_snapshot` events also carry `diagnostics.request_pressure`, with the effective maximum, current limit, in-flight count, waiters, and cooldown for each provider/model/request type. The file can contain column, provider, model, and resource names, and every event is flushed to disk as it is written.
+- **`scheduler_events.jsonl`.** Set `write_scheduler_events=True` on `RunConfig`, and a create run writes scheduler events to this file in the dataset directory. Preview runs do not write it. Every event includes a snapshot of task admission: limits, leased and available resources, and running tasks per group. The resource keys are `submission` (the `max_in_flight_tasks` budget), `llm_wait` (a cap on model-backed tasks, equal to `max_in_flight_tasks`; it is not the removed LLM-wait semaphore listed under [Renamed and Removed Names](#renamed-and-removed-names)), and `request:<provider>/<model>` (the provider/model task slots). `scheduler_health_snapshot` events also carry `diagnostics.request_pressure`, with the effective maximum, current limit, in-flight count, waiters, and cooldown for each provider/model/request type. The file can contain column, provider, model, and resource names, and every event is flushed to disk as it is written.
 - **Terminal UI.** With `display_tui=True`, the throughput chart puts a marker at each rate-limit or limit-decrease event.
 - **OpenTelemetry metrics.** `data_designer.model.request.active` and `gen_ai.client.operation.duration` come from the start and end of each model request. See [Local OpenTelemetry Metrics](/concepts/architecture-performance#local-opentelemetry-metrics).
 
@@ -94,7 +94,7 @@ Reading `scheduler_events.jsonl`:
 |--------------|--------------|
 | Health snapshots with `queued_total` near 0 and few `in_flight_tasks` while row groups are active | Dependency readiness: downstream columns are waiting on upstream ones |
 | Health snapshots with `active_row_groups` equal to `hard_cap_row_groups` | Row-group admission. Raising `max_concurrent_row_groups` exposes more ready work but uses more memory. |
-| `admission_blocked` events whose `reasons` show `no_capacity` | Task admission: `max_in_flight_tasks`, or the provider/model task slots |
+| `admission_blocked` events whose `reasons` show `no_capacity` | Task admission: `max_in_flight_tasks` (`submission`, `llm_wait`), or the provider/model task slots (`request:<provider>/<model>`) |
 | `group_capped` events, or `admission_blocked` with `borrow_debt` | Fair sharing: a group has used its share while another group is waiting |
 | `request_pressure` shows `waiters > 0`, `blocked: true`, or `current_limit` below `effective_max` | Request admission: the provider is rate limiting, or calls are at `max_parallel_requests` |
 | `request_pressure_advisory_skipped` events | The scheduler is working around a model under pressure by running other groups first |
@@ -107,8 +107,10 @@ Reading `scheduler_events.jsonl`:
 A column generator plugin can declare its broad resource shape by overriding `get_scheduling_metadata()` and returning a `SchedulingMetadata` from `data_designer.config`:
 
 - `SchedulingMetadata.local()` is the default. Use it for work that makes no model calls.
-- `SchedulingMetadata.model(provider_name, model_id, generation_kind, weight=...)` is for work against a single model endpoint.
+- `SchedulingMetadata.model(provider_name, model_id, generation_kind, weight=...)` is for work against a single model endpoint. `generation_kind` must be `chat`, `embedding`, or `image`. Any other value gets no provider/model task slot and no request-pressure advisory.
 - `SchedulingMetadata.custom_model(plugin_namespace, resource_name, version, weight=...)` is for plugin-defined model resources.
+
+For `SchedulingMetadata.model`, `weight` is more than a fair-share weight. It becomes the provider/model task-slot count, and when several generators use the same provider and model, the smallest `weight` wins. It also caps the group's admitted tasks at 2 × `weight`. Set it to the model's `max_parallel_requests`, as the built-in generators do. A `weight=1` on a shared model limits every column on that model to one task slot.
 
 Generators built on the model registry derive this metadata from their model aliases, so most plugins do not need to override it. The metadata is static. It says nothing about queues, leases, AIMD state, or runtime pressure, and those scheduler internals are not a plugin API.
 
@@ -126,7 +128,7 @@ Earlier releases used the throttle names below, and the dev notes from that peri
 | `ThrottleConfig` | `RequestAdmissionTuningConfig` |
 | Submission and LLM-wait semaphore handoff in the scheduler | Task admission leases |
 
-`RunConfig.throttle` is still accepted. Setting it raises a `DeprecationWarning`, and the `ThrottleConfig` it holds is translated to `request_admission`:
+`RunConfig.throttle` is still accepted. Setting it emits a `DeprecationWarning`, and the `ThrottleConfig` it holds is translated to `request_admission`. Setting both `throttle` and `request_admission` raises a `ValueError`.
 
 | `ThrottleConfig` field | `RequestAdmissionTuningConfig` field |
 |------------------------|--------------------------------------|
