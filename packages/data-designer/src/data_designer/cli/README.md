@@ -280,8 +280,9 @@ temperature = 0.7
 The lists are `model.providers`, `model.configs`, `mcp.providers` and `tools.configs`. A list defined here, even as
 `[]`, takes precedence over its YAML file, for both the CLI and the `DataDesigner` defaults; a list left out still
 comes from the YAML file. The CLI only reads `config.toml` for now: adding, updating or deleting entries of a list it
-defines fails with a message naming the file, so edit it directly. An invalid file (bad TOML, a missing or unsupported
-`version`, an unknown section or an invalid entry) is an error that names the file and the failing field.
+defines fails with a message naming the file, so edit it directly. `data-designer config list` shows the file's path
+when it exists. An invalid file (bad TOML, a missing or unsupported `version`, an unknown section or an invalid entry)
+is an error that names the file and the failing field.
 
 ### `~/.data-designer/managed-assets/`
 

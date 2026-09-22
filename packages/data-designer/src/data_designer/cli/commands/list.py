@@ -13,7 +13,8 @@ from data_designer.cli.repositories.provider_repository import ProviderRepositor
 from data_designer.cli.repositories.tool_repository import ToolRepository
 from data_designer.cli.ui import console, print_error, print_header, print_info, print_warning
 from data_designer.config.mcp import LocalStdioMCPProvider, MCPProvider
-from data_designer.config.utils.constants import DATA_DESIGNER_HOME, NordColor
+from data_designer.config.user_config import load_user_config
+from data_designer.config.utils.constants import DATA_DESIGNER_HOME, USER_CONFIG_FILE_NAME, NordColor
 
 # Pattern for valid environment variable names (uppercase letters, digits, underscores, not starting with digit)
 _ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
@@ -60,6 +61,11 @@ def list_command() -> None:
     # Determine config directory
     print_header("Data Designer Configurations")
     print_info(f"Configuration directory: {DATA_DESIGNER_HOME}")
+    # Parse config.toml once up front: a broken file then fails the command (via main()) with one error,
+    # instead of the same error under every section and exit code 0.
+    user_config_file = DATA_DESIGNER_HOME / USER_CONFIG_FILE_NAME
+    if load_user_config(user_config_file) is not None:
+        print_info(f"User configuration file: {user_config_file}")
     console.print()
 
     # Display all configuration types

@@ -55,7 +55,7 @@ def load_user_config(file_path: Path) -> UserConfig | None:
         The parsed file, or None if it does not exist.
 
     Raises:
-        InvalidUserConfigError: If the file is not valid TOML or does not match the schema.
+        InvalidUserConfigError: If the file cannot be read, is not valid TOML or does not match the schema.
             The message names the file and, for schema errors, the dotted location.
     """
     if not file_path.exists():
@@ -63,8 +63,10 @@ def load_user_config(file_path: Path) -> UserConfig | None:
     try:
         with open(file_path, "rb") as f:
             content = tomllib.load(f)
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise InvalidUserConfigError(f"Invalid TOML in {file_path}: {e}") from e
+    except OSError as e:
+        raise InvalidUserConfigError(f"Cannot read {file_path}: {e}") from e
     try:
         return UserConfig.model_validate(content)
     except ValidationError as e:

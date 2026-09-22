@@ -46,9 +46,12 @@ providers = ["local-tools"]
 """
 
 
-def _write(tmp_path: Path, content: str) -> Path:
+def _write(tmp_path: Path, content: str | bytes) -> Path:
     path = tmp_path / "config.toml"
-    path.write_text(content, encoding="utf-8")
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8")
     return path
 
 
@@ -108,6 +111,7 @@ def test_load_user_config_distinguishes_undefined_from_empty(
     "content, expected_location",
     [
         pytest.param("version = 1\n[[model.providers]\n", "Invalid TOML", id="malformed-toml"),
+        pytest.param(b"version = 1\n# \xff\n", "Invalid TOML", id="invalid-utf8"),
         pytest.param("[model]\nproviders = []\n", "version", id="missing-version"),
         pytest.param("version = 2\n", "version", id="unsupported-version"),
         pytest.param("version = 1\n[run]\nbuffer_size = 10\n", "run", id="unknown-section"),
@@ -119,7 +123,7 @@ def test_load_user_config_distinguishes_undefined_from_empty(
     ],
 )
 def test_load_user_config_fails_loudly_with_file_and_location(
-    tmp_path: Path, content: str, expected_location: str
+    tmp_path: Path, content: str | bytes, expected_location: str
 ) -> None:
     path = _write(tmp_path, content)
 
@@ -129,3 +133,13 @@ def test_load_user_config_fails_loudly_with_file_and_location(
     assert isinstance(exc_info.value, InvalidConfigError)
     assert str(path) in str(exc_info.value)
     assert expected_location in str(exc_info.value)
+
+
+def test_load_user_config_reports_an_unreadable_file(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.mkdir()
+
+    with pytest.raises(InvalidUserConfigError, match="Cannot read") as exc_info:
+        load_user_config(path)
+
+    assert str(path) in str(exc_info.value)
