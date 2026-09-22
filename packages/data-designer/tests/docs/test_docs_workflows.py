@@ -99,3 +99,13 @@ def test_docs_preview_deploy_publishes_the_preview_build_artifact() -> None:
     )
     assert f"--name {upload['with']['name']} " in deploy_text
     assert "FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}" in deploy_text
+
+
+def test_docs_preview_deploy_does_not_trust_pr_code() -> None:
+    deploy_text = (WORKFLOWS_DIR / "docs-preview-deploy.yml").read_text()
+    steps = yaml.safe_load(deploy_text)["jobs"]["deploy"]["steps"]
+
+    assert not any(s.get("uses", "").startswith("actions/checkout@") for s in steps)
+    # PR number from the artifact must match the event; Fern must not re-launch at the artifact's version.
+    assert "github.event.workflow_run.pull_requests.*.number" in deploy_text
+    assert 'FERN_NO_VERSION_REDIRECTION: "true"' in deploy_text
