@@ -12,6 +12,7 @@ from data_designer.cli.forms.provider_builder import ProviderFormBuilder
 
 # Pattern for valid environment variable names (uppercase letters, digits, underscores, not starting with digit)
 _ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+from data_designer.cli.repositories.base import UserConfigSectionReadOnlyError
 from data_designer.cli.repositories.model_repository import ModelRepository
 from data_designer.cli.repositories.provider_repository import ProviderRepository
 from data_designer.cli.services.model_service import ModelService
@@ -47,6 +48,13 @@ class ProviderController:
         print_header("Configure Model Providers")
         print_info(f"Configuration directory: {self.config_dir}")
         console.print()
+
+        # Every mode below writes, so refuse up front rather than after a form or a partial cascade.
+        try:
+            self.repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return
 
         # Check for existing configuration
         providers = self.service.list_all()
