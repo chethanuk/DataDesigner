@@ -53,15 +53,15 @@ If several model aliases point at the same provider and model, their `max_parall
 Ready tasks are grouped by the resource they use and by the columns they produce. Local work (samplers, expressions, custom columns without models) forms one kind of group. A model-backed column, such as an LLM column, whose aliases all resolve to one provider/model endpoint forms a model group. A custom column with `model_aliases`, or a column whose aliases span several endpoints, forms a custom-model group.
 
 - **Fair ordering.** The ready queue is weighted fair queueing over groups. A large ready frontier for one column does not starve the others, so independent columns keep moving instead of running in waves.
-- **Leases.** Every task takes one unit of the `max_in_flight_tasks` budget. A task in a model group also takes one task slot for its provider/model, and there are `max_parallel_requests` of those slots. That stops tasks for one model from filling the whole scheduler while they queue for request admission.
-- **Bounded borrowing.** Each group has a weighted fair share of a contended resource. A group running alone may borrow capacity nobody else is asking for. Borrowed capacity is tracked as debt, and a waiting peer group gets the next free slots until the debt is repaid.
+- **Leases.** Every task takes one unit of the `max_in_flight_tasks` budget. A task in a model group also takes one task slot for its provider/model, and there are `max_parallel_requests` of those slots. That stops tasks for one model from filling the whole scheduler while they queue for request admission. A custom-model group has no provider/model slot, so only fair sharing and `max_in_flight_tasks` bound it.
+- **Bounded borrowing.** Each model or custom-model group has a weighted fair share of a contended resource. A group running alone may borrow capacity nobody else is asking for. Borrowed capacity is tracked as debt, and a waiting peer group gets the next free slots until the debt is repaid. Local tasks only need a `max_in_flight_tasks` slot.
 - **Request-pressure advisory.** Before admitting a task for a provider/model that is cooling down after a 429, at its cap, or already has queued calls, the scheduler checks for another eligible group that is not under pressure. If it finds one, it runs that group's task instead. This only reads request-admission snapshots. It never takes or changes request leases.
 
 ---
 
 ## Request Admission
 
-Every model call goes through `ModelRequestExecutor`, which asks the request-admission controller for a lease, calls the provider, and releases the lease with the outcome. When `ModelRequestExecutor` retries a failed call, each retry is a new attempt and is admitted again.
+Every model call goes through `ModelRequestExecutor`, which asks the request-admission controller for a lease, calls the provider, and releases the lease with the outcome. `ModelRequestExecutor` also owns retries for transient failures (HTTP 502, 503, 504, and connection errors): up to 3 retries with exponential backoff, and each retry is a new attempt that is admitted again. HTTP-transport retries are turned off while request admission is active.
 
 The controller enforces two limits at once:
 
@@ -74,13 +74,13 @@ The AIMD rules, with the `RequestAdmissionTuningConfig` field for each:
 - **Recovery.** After `successes_until_increase` successful calls (default 25) outside a cooldown, the limit rises by `additive_increase_step` (default 1). It keeps rising until it is back at `max_parallel_requests`.
 - **Startup ramp.** When `startup_ramp_seconds` is greater than 0, each provider/model/request type starts at one concurrent call and climbs linearly to its cap over that time. The first 429 ends the ramp, and normal AIMD takes over.
 
-A 429 is not retried at the HTTP layer or inside `ModelRequestExecutor`, so the rate-limit signal reaches request admission straight away. Transient server errors (502, 503, 504) and connection errors are retried by the HTTP transport. A task that fails on a rate limit counts as a retryable failure, and the scheduler runs it again in a salvage round.
+A 429 is not retried inside `ModelRequestExecutor`, so the rate-limit signal reaches request admission straight away. A task that fails on a rate limit counts as a retryable failure, and the scheduler runs it again in a salvage round.
 
 ---
 
 ## Telemetry: Which Layer Is Limiting?
 
-The scheduler and request admission each emit their own events. They are joined by correlation fields: `run_id`, `row_group`, `task_column`, `task_type`, the scheduling group kind and identity hash, and `task_execution_id`. Events carry names, counts, and identifiers only, never prompts, completions, or row values.
+The scheduler and request admission each emit their own events. Scheduler events carry correlation fields (`run_id`, `row_group`, `task_column`, `task_type`, the scheduling group kind and identity hash, and `task_execution_id`) under `captured_correlation`. Request-admission events are not written to a file: they drive the TUI markers and OpenTelemetry metrics below, and their state shows up in `scheduler_events.jsonl` as `request_pressure` snapshots. Events carry names, counts, and identifiers only, never prompts, completions, or row values.
 
 You can see them in three places:
 
@@ -95,7 +95,7 @@ Reading `scheduler_events.jsonl`:
 | Health snapshots with `queued_total` near 0 and few `in_flight_tasks` while row groups are active | Dependency readiness: downstream columns are waiting on upstream ones |
 | Health snapshots with `active_row_groups` equal to `hard_cap_row_groups` | Row-group admission. Raising `max_concurrent_row_groups` exposes more ready work but uses more memory. |
 | `admission_blocked` events whose `reasons` show `no_capacity` | Task admission: `max_in_flight_tasks`, or the provider/model task slots |
-| `group_capped` events | Fair sharing: a group has used its share while another group is waiting |
+| `group_capped` events, or `admission_blocked` with `borrow_debt` | Fair sharing: a group has used its share while another group is waiting |
 | `request_pressure` shows `waiters > 0`, `blocked: true`, or `current_limit` below `effective_max` | Request admission: the provider is rate limiting, or calls are at `max_parallel_requests` |
 | `request_pressure_advisory_skipped` events | The scheduler is working around a model under pressure by running other groups first |
 | Low request pressure but long request durations in `gen_ai.client.operation.duration` | The provider itself is slow |
@@ -144,8 +144,8 @@ Request admission does not log each limit change, so the `concurrency reduced` /
 ## For Maintainers
 
 - Internals: `architecture/dataset-builders.md` (scheduler, task admission, fair queue) and `architecture/models.md` (request admission, model clients) in the repository.
-- Design notes for this architecture live in `plans/645/`. Where they differ from the code, the code is current. For example, the scheduler can build an `AsyncCapacityPlan`, but no public API returns it yet.
-- `scripts/benchmarks/benchmark_bounded_borrow_admission.py --output-dir <dir>` compares strict-fair and bounded-borrow task admission and writes JSON and Markdown reports.
+- Design notes for this architecture live in [`plans/645/`](https://github.com/NVIDIA-NeMo/DataDesigner/tree/main/plans/645) (epic [#645](https://github.com/NVIDIA-NeMo/DataDesigner/issues/645)). Where they differ from the code, the code is current. For example, the scheduler can build an `AsyncCapacityPlan`, but no public API returns it yet.
+- `scripts/benchmarks/benchmark_bounded_borrow_admission.py --output-dir <dir>` simulates two task-admission scenarios with no model calls, runs each under strict-fair and bounded-borrow admission, and writes `bounded_borrow_admission_benchmark.json` and `.md` to a timestamped folder under `<dir>`. In the Comparisons table, the delta columns are bounded minus strict, so a negative *Peer first wait delta* means a peer group that arrives late gets capacity sooner, and a *Wall time delta* near zero means total throughput did not suffer. *Peer p95 wait reduction* is a ratio, (strict − bounded) / strict, so a positive value is an improvement.
 
 ## Related Documentation
 
