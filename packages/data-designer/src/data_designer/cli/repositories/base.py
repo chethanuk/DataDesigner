@@ -87,7 +87,7 @@ class UserConfigSectionRepository(ConfigRepository[T]):
 
     def save(self, config: T) -> None:
         """Save configuration to the legacy file unless ``config.toml`` defines the section."""
-        self._raise_if_defined_in_user_config()
+        self.check_writable()
         self._save_legacy(config)
 
     def exists(self) -> bool:
@@ -96,14 +96,15 @@ class UserConfigSectionRepository(ConfigRepository[T]):
 
     def delete(self) -> None:
         """Delete the legacy file unless ``config.toml`` defines the section."""
-        self._raise_if_defined_in_user_config()
+        self.check_writable()
         self.config_file.unlink(missing_ok=True)
 
     def _load_user_config_section(self) -> T | None:
         user_config = load_user_config(self.user_config_file)
         return None if user_config is None else self._from_user_config(user_config)
 
-    def _raise_if_defined_in_user_config(self) -> None:
+    def check_writable(self) -> None:
+        """Raise ``UserConfigSectionReadOnlyError`` if ``config.toml`` defines this repository's section."""
         if self._load_user_config_section() is not None:
             raise UserConfigSectionReadOnlyError(
                 f"{self.user_config_section!r} is defined in {self.user_config_file}, which Data Designer only reads "

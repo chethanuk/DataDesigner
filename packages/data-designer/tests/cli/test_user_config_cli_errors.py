@@ -80,3 +80,74 @@ def test_config_list_shows_the_user_configuration_file_and_its_settings(
         assert text in output
     for text in not_expected_in_output:
         assert text not in output
+
+
+_TOML_MODEL_PROVIDERS = '[[model.providers]]\nname = "toml-provider"\nendpoint = "http://localhost:8000/v1"\n'
+_TOML_MCP_PROVIDERS = '[[mcp.providers]]\nprovider_type = "stdio"\nname = "toml-mcp"\ncommand = "python"\n'
+
+
+@pytest.mark.parametrize(
+    "command, config_toml, section",
+    [
+        pytest.param("providers", _TOML_MODEL_PROVIDERS, "model.providers", id="config-providers"),
+        pytest.param(
+            "models",
+            _TOML_MODEL_PROVIDERS + '[[model.configs]]\nalias = "a"\nmodel = "m"\nprovider = "toml-provider"\n',
+            "model.configs",
+            id="config-models",
+        ),
+        pytest.param("mcp", _TOML_MCP_PROVIDERS, "mcp.providers", id="config-mcp"),
+        pytest.param(
+            "tools",
+            _TOML_MCP_PROVIDERS + '[[tools.configs]]\ntool_alias = "t"\nproviders = ["toml-mcp"]\n',
+            "tools.configs",
+            id="config-tools",
+        ),
+    ],
+)
+def test_config_commands_refuse_a_toml_owned_section_before_changing_anything(
+    tmp_path: Path, command: str, config_toml: str, section: str
+) -> None:
+    (tmp_path / "config.toml").write_text("version = 1\n" + config_toml, encoding="utf-8")
+    # A YAML list that config.toml does not own; providers used to delete these models before being refused.
+    model_configs_yaml = "model_configs:\n- alias: yaml-text\n  model: m\n  provider: toml-provider\n"
+    (tmp_path / "model_configs.yaml").write_text(model_configs_yaml, encoding="utf-8")
+    env = {**os.environ, "DATA_DESIGNER_HOME": str(tmp_path), "COLUMNS": "200"}
+
+    result = subprocess.run(
+        [sys.executable, "-c", _RUN_CLI, "config", command],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 0, output
+    assert f"'{section}' is defined in" in output
+    assert "Traceback" not in output
+    assert (tmp_path / "model_configs.yaml").read_text(encoding="utf-8") == model_configs_yaml
+
+
+def test_config_reset_skips_toml_owned_sections_without_prompting(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text(
+        "version = 1\n[model]\nconfigs = []\n" + _TOML_MODEL_PROVIDERS, encoding="utf-8"
+    )
+    env = {**os.environ, "DATA_DESIGNER_HOME": str(tmp_path), "COLUMNS": "200"}
+
+    result = subprocess.run(
+        [sys.executable, "-c", _RUN_CLI, "config", "reset"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 0, output
+    assert "Skipped model providers configuration: defined in" in output
+    assert "Skipped model configs configuration: defined in" in output
+    assert "Delete model" not in output
+    assert (tmp_path / "config.toml").exists()
