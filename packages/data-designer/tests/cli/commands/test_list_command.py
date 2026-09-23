@@ -4,6 +4,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from rich.table import Table
 
 from data_designer.cli.commands.list import (
@@ -156,3 +157,25 @@ def test_display_tool_configs_exception(mock_console_print, mock_print_error, st
         display_tool_configs(stub_tool_service.repository)
     mock_print_error.assert_called_once_with("Error loading tool configuration: Test error")
     mock_console_print.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "display, repository_cls, toml_list, what",
+    [
+        pytest.param(display_providers, ProviderRepository, "[model]\nproviders = []", "Providers", id="providers"),
+        pytest.param(display_models, ModelRepository, "[model]\nconfigs = []", "Models", id="models"),
+        pytest.param(display_mcp_providers, MCPProviderRepository, "[mcp]\nproviders = []", "MCP providers", id="mcp"),
+        pytest.param(display_tool_configs, ToolRepository, "[tools]\nconfigs = []", "Tool configs", id="tools"),
+    ],
+)
+@patch("data_designer.cli.commands.list.print_warning")
+@patch("data_designer.cli.ui.console.print")
+def test_display_empty_list_defined_in_config_toml_points_to_config_toml(
+    mock_console_print, mock_print_warning, tmp_path: Path, display, repository_cls, toml_list: str, what: str
+) -> None:
+    user_config_file = tmp_path / "config.toml"
+    user_config_file.write_text(f"version = 1\n{toml_list}\n")
+    display(repository_cls(tmp_path))
+    mock_print_warning.assert_called_once_with(
+        f"{what} have not been configured. Edit {user_config_file} to configure them."
+    )

@@ -326,3 +326,36 @@ def test_default_model_settings_prefer_config_toml_per_list(
         assert get_default_model_settings_file("providers") == (
             user_config_file_path if expected_providers_from_toml else model_providers_file_path
         )
+
+
+@pytest.mark.parametrize(
+    "toml_content, expect_configs_yaml, expect_providers_yaml",
+    [
+        pytest.param(None, True, True, id="no-config-toml"),
+        pytest.param("version = 1\n", True, True, id="config-toml-defines-neither"),
+        pytest.param("version = 1\n" + _TOML_CONFIGS, False, True, id="config-toml-defines-configs"),
+        pytest.param("version = 1\n" + _TOML_PROVIDERS, True, False, id="config-toml-defines-providers"),
+        pytest.param("version = 1\n" + _TOML_PROVIDERS + _TOML_CONFIGS, False, False, id="config-toml-defines-both"),
+        pytest.param("version = 1\n[model]\nconfigs = []\n", False, True, id="config-toml-defines-empty-configs"),
+        pytest.param("not toml [", True, True, id="broken-config-toml-seeds-as-before"),
+    ],
+)
+def test_resolve_seed_default_model_settings_skips_lists_config_toml_defines(
+    tmp_path: Path, toml_content: str | None, expect_configs_yaml: bool, expect_providers_yaml: bool
+) -> None:
+    model_configs_file_path = tmp_path / "model_configs.yaml"
+    model_providers_file_path = tmp_path / "model_providers.yaml"
+    user_config_file_path = tmp_path / "config.toml"
+    if toml_content is not None:
+        user_config_file_path.write_text(toml_content)
+
+    with (
+        patch("data_designer.config.default_model_settings.MODEL_CONFIGS_FILE_PATH", new=model_configs_file_path),
+        patch("data_designer.config.default_model_settings.MODEL_PROVIDERS_FILE_PATH", new=model_providers_file_path),
+        patch("data_designer.config.default_model_settings.USER_CONFIG_FILE_PATH", new=user_config_file_path),
+        patch("data_designer.config.default_model_settings.MANAGED_ASSETS_PATH", new=tmp_path / "managed-assets"),
+    ):
+        resolve_seed_default_model_settings()
+
+    assert model_configs_file_path.exists() is expect_configs_yaml
+    assert model_providers_file_path.exists() is expect_providers_yaml

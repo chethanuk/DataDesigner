@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
+from data_designer.config.errors import InvalidUserConfigError
 from data_designer.config.models import (
     ChatCompletionInferenceParams,
     EmbeddingInferenceParams,
@@ -114,7 +115,14 @@ def get_default_model_settings_file(kind: Literal["configs", "providers"]) -> Pa
 
 
 def resolve_seed_default_model_settings() -> None:
-    if not MODEL_CONFIGS_FILE_PATH.exists():
+    # Don't seed a legacy YAML for a list config.toml defines: it would be ignored. A broken config.toml is
+    # reported by whoever reads it next, so seed as before rather than fail here.
+    try:
+        model_section = _load_user_model_section()
+    except InvalidUserConfigError:
+        model_section = None
+
+    if (model_section is None or model_section.configs is None) and not MODEL_CONFIGS_FILE_PATH.exists():
         logger.debug(
             f"🍾 Default model configs were not found, so writing the following to {str(MODEL_CONFIGS_FILE_PATH)!r}"
         )
@@ -123,7 +131,7 @@ def resolve_seed_default_model_settings() -> None:
             {"model_configs": [mc.model_dump(mode="json") for mc in get_builtin_model_configs()]},
         )
 
-    if not MODEL_PROVIDERS_FILE_PATH.exists():
+    if (model_section is None or model_section.providers is None) and not MODEL_PROVIDERS_FILE_PATH.exists():
         logger.debug(
             f"🪄  Default model providers were not found, so writing the following to {str(MODEL_PROVIDERS_FILE_PATH)!r}"
         )
