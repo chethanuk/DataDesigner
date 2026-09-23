@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import io
 import json
 import logging
 from datetime import datetime
@@ -25,7 +27,7 @@ from data_designer.config.column_configs import (
 from data_designer.config.column_types import DataDesignerColumnType
 from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.errors import InvalidConfigError
-from data_designer.config.models import ChatCompletionInferenceParams, ModelConfig, ModelProvider
+from data_designer.config.models import ChatCompletionInferenceParams, ImageContext, ModelConfig, ModelProvider
 from data_designer.config.processors import DropColumnsProcessorConfig
 from data_designer.config.run_config import JinjaRenderingEngine, RequestAdmissionTuningConfig, RunConfig
 from data_designer.config.sampler_params import CategorySamplerParams, DatetimeSamplerParams, SamplerType
@@ -1639,6 +1641,96 @@ def test_check_models_no_op_when_only_samplers(
     # short-circuits when no aliases are referenced. The contract here is "we always
     # delegate"; the no-op decision lives in the engine.
     assert mock_check.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("llm_columns", "skip_vlm", "expected_probes"),
+    [
+        pytest.param([("vlm", True)], False, {"vlm-model": True}, id="image-context"),
+        pytest.param([("txt", False)], False, {"txt-model": False}, id="text-only-unchanged"),
+        pytest.param(
+            [("vlm", True), ("vlm", False), ("txt", False)],
+            False,
+            {"vlm-model": True, "txt-model": False},
+            id="mixed-same-alias",
+        ),
+        pytest.param([("vlm", True), ("txt", False)], True, {"txt-model": False}, id="skip-health-check"),
+    ],
+)
+def test_check_models_sends_placeholder_image_to_image_context_models(
+    llm_columns,
+    skip_vlm,
+    expected_probes,
+    httpx_mock,
+    stub_check_models_data_designer,
+):
+    """A model fed image context gets an image in its health-check probe; text-only models do not."""
+    model_configs = [
+        ModelConfig(
+            alias=alias,
+            model=f"{alias}-model",
+            provider="stub-model-provider",
+            inference_parameters=ChatCompletionInferenceParams(),
+            skip_health_check=skip_vlm and alias == "vlm",
+        )
+        for alias in ("vlm", "txt")
+    ]
+    config_builder = DataDesignerConfigBuilder(model_configs=model_configs)
+    config_builder.add_column(
+        SamplerColumnConfig(
+            name="img",
+            sampler_type=SamplerType.CATEGORY,
+            params=CategorySamplerParams(values=["https://example.com/cat.png"]),
+        )
+    )
+    for i, (alias, with_image) in enumerate(llm_columns):
+        config_builder.add_column(
+            LLMTextColumnConfig(
+                name=f"col{i}",
+                prompt="Describe {{ img }}",
+                model_alias=alias,
+                multi_modal_context=[ImageContext(column_name="img")] if with_image else None,
+            )
+        )
+
+    probes: dict[str, list[dict[str, Any]]] = {}
+
+    def respond(request):
+        body = json.loads(request.content)
+        user_content = body["messages"][-1]["content"]
+        probes[body["model"]] = user_content
+        has_image = isinstance(user_content, list) and any(part["type"] == "image_url" for part in user_content)
+        if body["model"] == "vlm-model" and not has_image:
+            return lazy.httpx.Response(400, json={"error": {"message": "An image is required"}})
+        return lazy.httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": body["model"],
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+            },
+        )
+
+    httpx_mock.add_callback(respond, url="https://api.stub-model-provider.com/v1/chat/completions", is_reusable=True)
+
+    stub_check_models_data_designer.check_models(config_builder)
+
+    assert set(probes) == set(expected_probes)
+    for model, expect_image in expected_probes.items():
+        content = probes[model]
+        if not expect_image:
+            assert content in ("Hello!", [{"type": "text", "text": "Hello!"}])
+            continue
+        image_part, text_part = content
+        assert text_part == {"type": "text", "text": "Hello!"}
+        assert image_part["type"] == "image_url"
+        prefix = "data:image/png;base64,"
+        assert image_part["image_url"]["url"].startswith(prefix)
+        png = lazy.Image.open(io.BytesIO(base64.b64decode(image_part["image_url"]["url"][len(prefix) :])))
+        assert png.format == "PNG"
+        assert min(png.size) >= 28
 
 
 def test_validate_raises_error_when_seed_collides(
