@@ -13,6 +13,7 @@ from data_designer.config.default_model_settings import (
     get_builtin_model_providers,
     get_default_inference_parameters,
     get_default_model_configs,
+    get_default_model_settings_file,
     get_default_providers,
     get_providers_with_missing_api_keys,
     resolve_seed_default_model_settings,
@@ -254,3 +255,107 @@ def test_get_providers_with_missing_api_keys_mixed_case():
         # provider2 has uppercase key but env var not set -> MISSING
         assert len(missing) == 1
         assert missing[0].name == "provider2"
+
+
+_TOML_PROVIDERS = '[[model.providers]]\nname = "toml-provider"\nendpoint = "http://localhost:8000/v1"\n'
+_TOML_CONFIGS = '[[model.configs]]\nalias = "toml-text"\nmodel = "toml-model"\nprovider = "toml-provider"\n'
+
+
+@pytest.mark.parametrize(
+    "toml_content, expected_config_aliases, expected_provider_names, expected_configs_from_toml, expected_providers_from_toml",
+    [
+        pytest.param(None, ["yaml-text"], ["yaml-provider"], False, False, id="no-config-toml"),
+        pytest.param("version = 1\n", ["yaml-text"], ["yaml-provider"], False, False, id="config-toml-without-model"),
+        pytest.param(
+            "version = 1\n" + _TOML_CONFIGS,
+            ["toml-text"],
+            ["yaml-provider"],
+            True,
+            False,
+            id="config-toml-configs-only",
+        ),
+        pytest.param(
+            "version = 1\n" + _TOML_PROVIDERS,
+            ["yaml-text"],
+            ["toml-provider"],
+            False,
+            True,
+            id="config-toml-providers-only",
+        ),
+        pytest.param(
+            "version = 1\n" + _TOML_PROVIDERS + _TOML_CONFIGS,
+            ["toml-text"],
+            ["toml-provider"],
+            True,
+            True,
+            id="config-toml-both",
+        ),
+        pytest.param("version = 1\n[model]\nconfigs = []\n", [], ["yaml-provider"], True, False, id="empty-toml-list"),
+    ],
+)
+def test_default_model_settings_prefer_config_toml_per_list(
+    tmp_path: Path,
+    toml_content: str | None,
+    expected_config_aliases: list[str],
+    expected_provider_names: list[str],
+    expected_configs_from_toml: bool,
+    expected_providers_from_toml: bool,
+) -> None:
+    model_configs_file_path = tmp_path / "model_configs.yaml"
+    model_providers_file_path = tmp_path / "model_providers.yaml"
+    user_config_file_path = tmp_path / "config.toml"
+    model_configs_file_path.write_text(
+        yaml.safe_dump({"model_configs": [{"alias": "yaml-text", "model": "yaml-model", "provider": "yaml-provider"}]})
+    )
+    model_providers_file_path.write_text(
+        yaml.safe_dump({"providers": [{"name": "yaml-provider", "endpoint": "http://localhost:9000/v1"}]})
+    )
+    if toml_content is not None:
+        user_config_file_path.write_text(toml_content)
+
+    with (
+        patch("data_designer.config.default_model_settings.MODEL_CONFIGS_FILE_PATH", new=model_configs_file_path),
+        patch("data_designer.config.default_model_settings.MODEL_PROVIDERS_FILE_PATH", new=model_providers_file_path),
+        patch("data_designer.config.default_model_settings.USER_CONFIG_FILE_PATH", new=user_config_file_path),
+    ):
+        assert [mc.alias for mc in get_default_model_configs()] == expected_config_aliases
+        assert [p.name for p in get_default_providers()] == expected_provider_names
+        assert get_default_model_settings_file("configs") == (
+            user_config_file_path if expected_configs_from_toml else model_configs_file_path
+        )
+        assert get_default_model_settings_file("providers") == (
+            user_config_file_path if expected_providers_from_toml else model_providers_file_path
+        )
+
+
+@pytest.mark.parametrize(
+    "toml_content, expect_configs_yaml, expect_providers_yaml",
+    [
+        pytest.param(None, True, True, id="no-config-toml"),
+        pytest.param("version = 1\n", True, True, id="config-toml-defines-neither"),
+        pytest.param("version = 1\n" + _TOML_CONFIGS, False, True, id="config-toml-defines-configs"),
+        pytest.param("version = 1\n" + _TOML_PROVIDERS, True, False, id="config-toml-defines-providers"),
+        pytest.param("version = 1\n" + _TOML_PROVIDERS + _TOML_CONFIGS, False, False, id="config-toml-defines-both"),
+        pytest.param("version = 1\n[model]\nconfigs = []\n", False, True, id="config-toml-defines-empty-configs"),
+        pytest.param("not toml [", True, True, id="broken-config-toml-seeds-as-before"),
+    ],
+)
+def test_resolve_seed_default_model_settings_skips_lists_config_toml_defines(
+    tmp_path: Path, toml_content: str | None, expect_configs_yaml: bool, expect_providers_yaml: bool
+) -> None:
+    model_configs_file_path = tmp_path / "model_configs.yaml"
+    model_providers_file_path = tmp_path / "model_providers.yaml"
+    user_config_file_path = tmp_path / "config.toml"
+    if toml_content is not None:
+        user_config_file_path.write_text(toml_content)
+
+    with (
+        patch("data_designer.config.default_model_settings.MODEL_CONFIGS_FILE_PATH", new=model_configs_file_path),
+        patch("data_designer.config.default_model_settings.MODEL_PROVIDERS_FILE_PATH", new=model_providers_file_path),
+        patch("data_designer.config.default_model_settings.USER_CONFIG_FILE_PATH", new=user_config_file_path),
+        patch("data_designer.config.default_model_settings.MANAGED_ASSETS_PATH", new=tmp_path / "managed-assets"),
+    ):
+        resolve_seed_default_model_settings()
+
+    assert model_configs_file_path.exists() is expect_configs_yaml
+    assert model_providers_file_path.exists() is expect_providers_yaml

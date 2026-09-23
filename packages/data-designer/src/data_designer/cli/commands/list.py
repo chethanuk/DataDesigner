@@ -7,13 +7,15 @@ import re
 
 from rich.table import Table
 
+from data_designer.cli.repositories.base import UserConfigSectionRepository
 from data_designer.cli.repositories.mcp_provider_repository import MCPProviderRepository
 from data_designer.cli.repositories.model_repository import ModelRepository
 from data_designer.cli.repositories.provider_repository import ProviderRepository
 from data_designer.cli.repositories.tool_repository import ToolRepository
 from data_designer.cli.ui import console, print_error, print_header, print_info, print_warning
 from data_designer.config.mcp import LocalStdioMCPProvider, MCPProvider
-from data_designer.config.utils.constants import DATA_DESIGNER_HOME, NordColor
+from data_designer.config.user_config import load_user_config
+from data_designer.config.utils.constants import DATA_DESIGNER_HOME, USER_CONFIG_FILE_PATH, NordColor
 
 # Pattern for valid environment variable names (uppercase letters, digits, underscores, not starting with digit)
 _ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
@@ -51,6 +53,15 @@ def _mask_api_key(api_key: str | None) -> str:
     return "***" + api_key[-4:] if len(api_key) > 4 else "***"
 
 
+def _print_not_configured(repo: UserConfigSectionRepository, what: str, command: str) -> None:
+    # `data-designer config <command>` refuses a list config.toml defines, so point there instead.
+    if repo.source_file == repo.user_config_file:
+        print_warning(f"{what} have not been configured. Edit {repo.user_config_file} to configure them.")
+    else:
+        print_warning(f"{what} have not been configured. Run 'data-designer config {command}' to configure them.")
+    console.print()
+
+
 def list_command() -> None:
     """List current Data Designer configurations.
 
@@ -60,6 +71,10 @@ def list_command() -> None:
     # Determine config directory
     print_header("Data Designer Configurations")
     print_info(f"Configuration directory: {DATA_DESIGNER_HOME}")
+    # Parse config.toml once up front: a broken file then fails the command (via main()) with one error,
+    # instead of the same error under every section and exit code 0.
+    if load_user_config(USER_CONFIG_FILE_PATH) is not None:
+        print_info(f"User configuration file: {USER_CONFIG_FILE_PATH}")
     console.print()
 
     # Display all configuration types
@@ -81,9 +96,8 @@ def display_providers(provider_repo: ProviderRepository) -> None:
     try:
         provider_registry = provider_repo.load()
 
-        if not provider_registry:
-            print_warning("Providers have not been configured. Run 'data-designer config providers' to configure them.")
-            console.print()
+        if not provider_registry or not provider_registry.providers:
+            _print_not_configured(provider_repo, "Providers", "providers")
             return
 
         # Display as table
@@ -122,9 +136,8 @@ def display_models(model_repo: ModelRepository) -> None:
     try:
         registry = model_repo.load()
 
-        if not registry:
-            print_warning("Models have not been configured. Run 'data-designer config models' to configure them.")
-            console.print()
+        if not registry or not registry.model_configs:
+            _print_not_configured(model_repo, "Models", "models")
             return
 
         # Display as table
@@ -165,9 +178,8 @@ def display_mcp_providers(mcp_provider_repo: MCPProviderRepository) -> None:
     try:
         registry = mcp_provider_repo.load()
 
-        if not registry:
-            print_warning("MCP providers have not been configured. Run 'data-designer config mcp' to configure them.")
-            console.print()
+        if not registry or not registry.providers:
+            _print_not_configured(mcp_provider_repo, "MCP providers", "mcp")
             return
 
         # Display as table
@@ -217,9 +229,8 @@ def display_tool_configs(tool_repo: ToolRepository) -> None:
     try:
         registry = tool_repo.load()
 
-        if not registry:
-            print_warning("Tool configs have not been configured. Run 'data-designer config tools' to configure them.")
-            console.print()
+        if not registry or not registry.tool_configs:
+            _print_not_configured(tool_repo, "Tool configs", "tools")
             return
 
         # Display as table
