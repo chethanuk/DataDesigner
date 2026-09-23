@@ -1,10 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
+import io
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import data_designer.lazy_heavy_imports as lazy
 from data_designer.config.models import ChatCompletionInferenceParams, ModelConfig
 from data_designer.config.run_config import RequestAdmissionTuningConfig, RunConfig
 from data_designer.engine.models.clients.model_request_executor import ModelRequestExecutor
@@ -533,6 +536,49 @@ async def test_arun_health_check_rejects_empty_embedding_vector(
         await stub_model_registry.arun_health_check(["stub-embedding"])
 
     mock_agenerate_text_embeddings.assert_awaited_once()
+
+
+def _probe_user_content(messages: list) -> object:
+    # agenerate appends the assistant reply to the same list after the call, so select by role.
+    return next(message.content for message in messages if message.role == "user")
+
+
+@pytest.mark.parametrize(
+    ("image_context_aliases", "expect_image"),
+    [
+        pytest.param({"stub-text"}, True, id="flagged"),
+        pytest.param({"stub-reasoning"}, False, id="other-alias-flagged"),
+        pytest.param((), False, id="default"),
+    ],
+)
+@patch.object(ModelFacade, "acompletion", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_arun_health_check_attaches_placeholder_image_to_flagged_aliases(
+    mock_acompletion: AsyncMock,
+    image_context_aliases: set[str],
+    expect_image: bool,
+    stub_model_registry: ModelRegistry,
+) -> None:
+    mock_acompletion.return_value = make_stub_completion_response(content="Hello!")
+
+    await stub_model_registry.arun_health_check(["stub-text"], image_context_aliases=image_context_aliases)
+
+    content = _probe_user_content(mock_acompletion.await_args.args[0])
+    _assert_probe_content(content, expect_image=expect_image)
+
+
+def _assert_probe_content(content: object, *, expect_image: bool) -> None:
+    if not expect_image:
+        assert content == "Hello!"
+        return
+    image_block, text_block = content
+    assert text_block == {"type": "text", "text": "Hello!"}
+    assert image_block["type"] == "image"
+    assert image_block["source"]["type"] == "base64"
+    assert image_block["source"]["media_type"] == "image/png"
+    png = lazy.Image.open(io.BytesIO(base64.b64decode(image_block["source"]["data"])))
+    assert png.format == "PNG"
+    assert min(png.size) >= 28
 
 
 def test_get_aggregate_max_parallel_requests(stub_model_registry: ModelRegistry) -> None:
