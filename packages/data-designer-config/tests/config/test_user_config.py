@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -141,5 +142,20 @@ def test_load_user_config_reports_an_unreadable_file(tmp_path: Path) -> None:
 
     with pytest.raises(InvalidUserConfigError, match="Cannot read") as exc_info:
         load_user_config(path)
+
+    assert str(path) in str(exc_info.value)
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions enforced")
+def test_load_user_config_reports_an_unsearchable_parent_directory(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    path = home / "config.toml"
+    home.chmod(0)
+    try:
+        with pytest.raises(InvalidUserConfigError, match="Cannot read") as exc_info:
+            load_user_config(path)
+    finally:
+        home.chmod(0o700)
 
     assert str(path) in str(exc_info.value)
