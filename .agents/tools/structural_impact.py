@@ -223,7 +223,7 @@ def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_file
     analysis = _build_graph(_collect_source_files(repo_root))
     G, communities, gods = analysis.graph, analysis.communities, analysis.god_nodes
 
-    changed_paths = {str(p) for p in changed_files}
+    changed_paths = {str(p.resolve()) for p in changed_files}
     changed_node_ids = {nid for nid in G.nodes() if G.nodes[nid].get("source_file") in changed_paths}
 
     node_to_community = {n: cid for cid, nodes in communities.items() for n in nodes}
