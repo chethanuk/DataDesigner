@@ -278,7 +278,7 @@ model = dd.ModelConfig(
 Finding the optimal value
 The right value depends on your inference stack and model. Self-hosted vLLM servers can often handle values as high as 256, 512, or even 1024 depending on your hardware.
 
-With AIMD, a practical approach is to set `max_parallel_requests` to the **upper bound** you're comfortable with and let request admission find the sustainable level automatically. If you see frequent 429 → recovery cycles in the logs, your ceiling is above the server's true capacity but the system is handling it. If you never see any request-admission activity, you may have room to increase the ceiling further.
+With AIMD, a practical approach is to set `max_parallel_requests` to the **upper bound** you're comfortable with and let request admission find the sustainable level automatically. If you see frequent 429 → recovery cycles (rate-limit markers in the TUI, or `request_pressure` in `scheduler_events.jsonl`), your ceiling is above the server's true capacity but the system is handling it. If you never see any request-admission activity, you may have room to increase the ceiling further.
 
 **Benchmark approach**: Run a small dataset (e.g., 100 records) with increasing `max_parallel_requests` values (4 → 8 → 16 → 32 → ...) and measure generation time. Stop increasing when the runtime stops decreasing—that's when your inference server is saturated.
 </Tip>
