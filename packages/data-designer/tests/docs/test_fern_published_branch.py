@@ -252,20 +252,24 @@ def seed_minimal_publish_trees(source_root: Path, published_root: Path) -> None:
         ),
     ],
 )
+@pytest.mark.parametrize("entry_point", ["sync_source", "patch_devnotes"])
 def test_publishing_retargets_links_to_moved_support_files(
-    tmp_path: Path, published_link: str, expected_link: str
+    tmp_path: Path, entry_point: str, published_link: str, expected_link: str
 ) -> None:
     module = load_script_module()
+    publish = getattr(module, entry_point)
     source_root = tmp_path / "source"
     published_root = tmp_path / "published"
     seed_minimal_publish_trees(source_root, published_root)
     frozen_page = published_root / "fern" / "versions" / "v0.9.2" / "pages" / "notebooks" / "1-the-basics.mdx"
-    latest_page = published_root / "fern" / "versions" / "latest" / "pages" / "concepts" / "columns.mdx"
-    for page in (frozen_page, latest_page):
+    latest_rel = Path("fern") / "versions" / "latest" / "pages" / "concepts" / "columns.mdx"
+    latest_page = published_root / latest_rel
+    # sync_source rebuilds latest from the source tree and keeps frozen versions; patch_devnotes edits in place.
+    for page in (frozen_page, latest_page, source_root / latest_rel):
         write_text(page, f"[Open]({published_link})\n")
 
-    assert module.patch_devnotes(patch_args(source_root, published_root)) == 0
-    assert module.patch_devnotes(patch_args(source_root, published_root)) == 0
+    assert publish(patch_args(source_root, published_root)) == 0
+    assert publish(patch_args(source_root, published_root)) == 0
 
     for page in (frozen_page, latest_page):
         assert page.read_text() == f"[Open]({expected_link})\n"
