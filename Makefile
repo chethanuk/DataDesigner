@@ -24,8 +24,8 @@ INTERFACE_TESTS := $(INTERFACE_PKG)/tests
 AGENT_TOOLS_TESTS := .agents/tools/tests
 
 # structural_impact.py imports graphify at module level, and graphify is not a workspace
-# dependency - CI installs it ad hoc (.github/workflows/agentic-ci-pr-review.yml). Keep the
-# version in step with that workflow.
+# dependency - CI installs it ad hoc (.github/workflows/agentic-ci-pr-review.yml and
+# agentic-ci-daily.yml). Keep the version in step with both workflows.
 GRAPHIFY_PIN := graphifyy==0.4.23
 
 define install-pre-commit-hooks
