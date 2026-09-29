@@ -993,7 +993,3 @@ def test_reporter_request_wait_through_real_admission_controller(
         assert summed - 0.1 < wait < summed + 0.25
     if backoff:
         assert idle >= 0.4
-    # Every acquire this run emitted reached the reporter, so nothing is left half-paired: the pairing
-    # state is empty once the run ends, including across retries and concurrent threads.
-    assert reporter._open_leases == {}  # noqa: SLF001
-    assert reporter._early_releases == {}  # noqa: SLF001

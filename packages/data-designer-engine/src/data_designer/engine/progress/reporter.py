@@ -196,6 +196,8 @@ class AsyncProgressReporter:
         at = event.captured_at_monotonic
         # Events are stamped under the controller lock but delivered after it is released, so threads can
         # deliver them out of order. Keep raw intervals (16 bytes per request) and merge them in log_final.
+        # log_final builds and sorts a list of tuples, so its transient peak is ~150 bytes and ~1 us
+        # per request (2M requests on one column: ~300 MB, ~2 s); compact intervals during the run if that bites.
         with self._wait_lock:
             if event.event_kind == "request_lease_acquired":
                 self._column_requests[column] = self._column_requests.get(column, 0) + 1
