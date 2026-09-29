@@ -108,7 +108,7 @@ For a given model, async request concurrency is bounded by:
 ```python
 concurrent_requests = min(
     active_ready_model_cells,  # Ready cells across active row groups
-    task_admission_slots,      # Task leases: max_in_flight_tasks overall, max_parallel_requests per model
+    task_admission_slots,      # max_in_flight_tasks + per-model task slots
     current_admission_limit,   # AIMD-managed request limit (≤ max_parallel_requests)
 )
 ```
