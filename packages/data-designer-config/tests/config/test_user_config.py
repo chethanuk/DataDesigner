@@ -115,6 +115,8 @@ def test_load_user_config_distinguishes_undefined_from_empty(
         pytest.param(b"version = 1\n# \xff\n", "Invalid TOML", id="invalid-utf8"),
         pytest.param("[model]\nproviders = []\n", "version", id="missing-version"),
         pytest.param("version = 2\n", "version", id="unsupported-version"),
+        pytest.param("version = true\n", "version", id="bool-version"),
+        pytest.param("version = 1.0\n", "version", id="float-version"),
         pytest.param("version = 1\n[run]\nbuffer_size = 10\n", "run", id="unknown-section"),
         pytest.param(
             'version = 1\n[[model.configs]]\nalias = "a"\nmodel = "m"\n',

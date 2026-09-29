@@ -22,6 +22,13 @@ from data_designer.config.models import ChatCompletionInferenceParams, Embedding
 from data_designer.config.utils.visualization import get_nvidia_api_key, get_openai_api_key
 
 
+@pytest.fixture(autouse=True)
+def _no_user_config_file(tmp_path: Path):
+    """Keep a real config.toml under DATA_DESIGNER_HOME from overriding the YAML files these tests patch."""
+    with patch("data_designer.config.default_model_settings.USER_CONFIG_FILE_PATH", new=tmp_path / "absent.toml"):
+        yield
+
+
 def test_get_default_inference_parameters():
     assert get_default_inference_parameters(
         "text", {"temperature": 0.85, "top_p": 0.95}

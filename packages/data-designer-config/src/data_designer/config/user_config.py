@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 
 from data_designer.config.base import ConfigBase
 from data_designer.config.errors import InvalidUserConfigError
@@ -46,6 +46,14 @@ class UserConfig(ConfigBase):
     model: UserModelSection = Field(default_factory=UserModelSection)
     mcp: UserMCPSection = Field(default_factory=UserMCPSection)
     tools: UserToolsSection = Field(default_factory=UserToolsSection)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _require_integer_version(cls, value: object) -> object:
+        # Literal[1] alone coerces TOML `true` and `1.0` to 1, and Literal can't be marked strict.
+        if type(value) is not int:
+            raise ValueError(f"version must be an integer, got {value!r}")
+        return value
 
 
 def load_user_config(file_path: Path) -> UserConfig | None:
