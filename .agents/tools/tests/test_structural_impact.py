@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import inspect
+import types
 from pathlib import Path
 
 import pytest
@@ -162,19 +163,28 @@ def test_unknown_package_dirs_skips_paths_outside_the_repo_root(repo_root: Path,
     assert _unknown_package_dirs([outside], repo_root) == []
 
 
+def _names_read(code: types.CodeType) -> set[str]:
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _names_read(const)
+    return names
+
+
 def test_no_function_reads_a_module_level_repo_root() -> None:
     """Guard for every `_REPO_ROOT` reader, including `_full_mode`'s `graphify-out` path.
 
     Python resolves a global name inside a function body at call time, so a reader left behind
     after the global is deleted raises `NameError` only when that path runs - and `--full` is
     exercised by a nightly agentic recipe, not by this suite. `co_names` is an exact match, so
-    `_REPO_ROOT_DEFAULT` does not count.
+    `_REPO_ROOT_DEFAULT` does not count. Nested code objects (comprehensions, generator
+    expressions, lambdas) keep their own `co_names`, so they are walked too.
     """
     assert not hasattr(structural_impact, "_REPO_ROOT")
 
     offenders = sorted(
         fn.__name__
         for fn in vars(structural_impact).values()
-        if inspect.isfunction(fn) and "_REPO_ROOT" in fn.__code__.co_names
+        if inspect.isfunction(fn) and "_REPO_ROOT" in _names_read(fn.__code__)
     )
     assert offenders == []
