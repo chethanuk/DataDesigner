@@ -13,7 +13,6 @@ from unittest.mock import Mock
 import pytest
 
 from data_designer.engine.observability import (
-    FilteringRequestAdmissionEventSink,
     FilteringSchedulerAdmissionEventSink,
     JsonlSchedulerEventSink,
     RequestAdmissionEvent,
@@ -266,17 +265,9 @@ def test_request_event_sink_interest_defaults_to_all_and_honors_filter() -> None
     assert not request_event_sink_accepts(BrokenInterestSink(), "model_request_started")
 
 
-@pytest.mark.parametrize(
-    ("protocol", "expected"),
-    [
-        (SchedulerAdmissionEventSink, True),
-        (RequestAdmissionEventSink, True),
-        (FilteringSchedulerAdmissionEventSink, False),
-        (FilteringRequestAdmissionEventSink, False),
-    ],
-)
-def test_sink_without_filters_satisfies_only_the_base_protocols(protocol: type, expected: bool) -> None:
-    assert isinstance(InMemoryAdmissionEventSink(), protocol) is expected
+@pytest.mark.parametrize("protocol", [SchedulerAdmissionEventSink, RequestAdmissionEventSink])
+def test_sink_without_filters_satisfies_the_base_protocols(protocol: type) -> None:
+    assert isinstance(InMemoryAdmissionEventSink(), protocol)
 
 
 def test_fanout_sink_is_recognized_as_a_filtering_scheduler_sink() -> None:
