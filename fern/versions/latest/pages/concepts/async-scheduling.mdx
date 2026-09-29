@@ -110,7 +110,7 @@ A column generator plugin can declare its broad resource shape by overriding `ge
 - `SchedulingMetadata.model(provider_name, model_id, generation_kind, weight=...)` is for work against a single model endpoint. `generation_kind` must be `chat`, `embedding`, or `image`. Any other value gets no provider/model task slot and no request-pressure advisory.
 - `SchedulingMetadata.custom_model(plugin_namespace, resource_name, version, weight=...)` is for plugin-defined model resources.
 
-For `SchedulingMetadata.model`, `weight` is more than a fair-share weight. It becomes the provider/model task-slot count, and when several generators use the same provider and model, the smallest `weight` wins. It also caps the group's admitted tasks at 2 × `weight`. Set it to the model's `max_parallel_requests`, as the built-in generators do. A `weight=1` on a shared model limits every column on that model to one task slot.
+For `SchedulingMetadata.model`, `weight` is more than a fair-share weight. It becomes the provider/model task-slot count, and when several generators use the same provider and model, the smallest `weight` wins. When other groups are waiting for the same resources, it also caps the group's fair share at 2 × `weight`. Set it to the model's `max_parallel_requests`, as the built-in generators do. A `weight=1` on a shared model limits every column on that model to one task slot.
 
 Generators built on the model registry derive this metadata from their model aliases, so most plugins do not need to override it. The metadata is static. It says nothing about queues, leases, AIMD state, or runtime pressure, and those scheduler internals are not a plugin API.
 
