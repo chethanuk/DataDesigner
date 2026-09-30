@@ -7,9 +7,21 @@ This folder is the Fern Docs build for NeMo Data Designer. The site deploys to *
 Data Designer docs are Fern-first:
 
 - Edit docs prose under `fern/`.
-- Treat `docs/notebook_source/*.py` as the notebook source of truth.
+- Treat `fern/notebook_source/*.py` as the notebook source of truth.
 - Keep generated Fern notebook artifacts gitignored.
 - Keep the legacy MkDocs `gh-pages` archive frozen for releases `0.5.7` and older.
+
+Every docs source and support file lives in this folder:
+
+| Path | Kind |
+|---|---|
+| `versions/`, `docs.yml`, `components/`, `assets/`, `images/`, `styles/` | Source: Fern pages, config, components, images |
+| `notebook_source/*.py` | Source: jupytext tutorials |
+| `assets/recipes/**/*.py` | Source: downloadable recipe scripts linked from recipe pages |
+| `scripts/` | Source: docs build, release, and notebook helpers |
+| `colab_notebooks/*.ipynb` | Generated and committed by `make generate-colab-notebooks`; targets of the "Open in Colab" links |
+| `notebooks/` | Generated, gitignored: executed tutorials from `make convert-execute-notebooks` |
+| `components/notebooks/` | Generated, gitignored: Fern JSON/TS from `make generate-fern-notebooks` |
 
 ## Prerequisites
 
@@ -24,14 +36,14 @@ One pre-render step is needed before the dev server has all tutorial content. It
 
 ### Notebook tutorials (gitignored - regenerate on clone)
 
-Each tutorial source file is converted to a JSON+TS pair in `fern/components/notebooks/`, then rendered through the `<NotebookViewer>` component on the wrapper MDX page. Output is gitignored; regenerate it after cloning and after changing `docs/notebook_source/*.py`.
+Each tutorial source file is converted to a JSON+TS pair in `fern/components/notebooks/`, then rendered through the `<NotebookViewer>` component on the wrapper MDX page. Output is gitignored; regenerate it after cloning and after changing `fern/notebook_source/*.py`.
 
 ```bash
-make generate-fern-notebooks                 # convert docs/notebook_source/*.py, preferring docs/notebooks/*.ipynb when present
+make generate-fern-notebooks                 # convert fern/notebook_source/*.py, preferring fern/notebooks/*.ipynb when present
 make generate-fern-notebooks-with-outputs    # full pipeline: execute → colabify → convert (needs NVIDIA_API_KEY)
 ```
 
-The docs build does not use `docs/colab_notebooks/`; those files exist for the wrapper pages' `colabUrl` links. The converter (`fern/scripts/ipynb-to-fern-json.py`) still strips Colab-only setup cells defensively if run on a Colab notebook.
+The docs build does not use `fern/colab_notebooks/`; those files exist for the wrapper pages' `colabUrl` links. The converter (`fern/scripts/ipynb-to-fern-json.py`) still strips Colab-only setup cells defensively if run on a Colab notebook.
 
 Fern does not run this conversion automatically. Run `make prepare-fern-docs` before local preview/checks, and run the same notebook conversion in CI before `fern generate --docs`.
 
@@ -170,7 +182,7 @@ Support and CI targets:
 | Command | Purpose |
 |---------|---------|
 | `make install-docs-deps` | Install docs and notebook dependencies |
-| `make generate-fern-notebooks` | Refresh gitignored notebook output from `docs/notebook_source/*.py` |
+| `make generate-fern-notebooks` | Refresh gitignored notebook output from `fern/notebook_source/*.py` |
 | `make prepare-fern-docs` | Generate local Fern notebook artifacts |
 | `make check-fern-links` | Validate internal routes and fragments in `latest` against navigation-derived Fern URLs and configured redirects |
 | `make check-fern-docs` | Generate local Fern notebook artifacts, validate internal links, and run `fern check` |

@@ -6,7 +6,7 @@
 # source or runtime context changed since the last cached build.
 #
 # Usage:
-#   ./docs/scripts/build_notebooks_cached.sh [CACHE_DIR]
+#   ./fern/scripts/build_notebooks_cached.sh [CACHE_DIR]
 #
 # CACHE_DIR defaults to .notebook-cache
 
@@ -21,8 +21,8 @@ compute_sha256() {
 }
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SOURCE_DIR="$REPO_ROOT/docs/notebook_source"
-OUTPUT_DIR="$REPO_ROOT/docs/notebooks"
+SOURCE_DIR="$REPO_ROOT/fern/notebook_source"
+OUTPUT_DIR="$REPO_ROOT/fern/notebooks"
 CACHE_DIR="${1:-$REPO_ROOT/.notebook-cache}"
 DOCS_JUPYTEXT="${DOCS_JUPYTEXT:-$REPO_ROOT/.venv/bin/jupytext}"
 NOTEBOOK_EXECUTION_ATTEMPTS="${NOTEBOOK_EXECUTION_ATTEMPTS:-1}"

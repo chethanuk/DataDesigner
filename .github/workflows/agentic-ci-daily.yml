@@ -341,7 +341,7 @@ jobs:
 
             case "$SUITE" in
               docs-and-references)
-                ALLOW='^(architecture/|docs/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|STYLEGUIDE\.md$|packages/[^/]+/src/.*\.py$)'
+                ALLOW='^(architecture/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|STYLEGUIDE\.md$|packages/[^/]+/src/.*\.py$)'
                 ;;
               dependencies)
                 ALLOW='^(packages/[^/]+/pyproject\.toml|uv\.lock)$'

@@ -118,7 +118,7 @@ jobs:
           mkdir -p "$snapshot_dir"
           gh release download "$release_tag" --repo "$SOURCE_REPOSITORY" \
             --pattern "$asset" --dir "$snapshot_dir"
-          bash ../workflow/docs/scripts/fern_notebook_snapshot.sh \
+          bash ../workflow/fern/scripts/fern_notebook_snapshot.sh \
             restore . "$snapshot_dir/$asset"
 
       - name: Check Fern docs
