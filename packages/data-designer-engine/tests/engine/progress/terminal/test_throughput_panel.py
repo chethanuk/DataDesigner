@@ -785,6 +785,10 @@ _WAIT_CASES = {
         [("a", "prompt", "nemotron", 12, 17)],
         {"column 'prompt'": ("nemotron", 5.0, 15.0, 75.0, 1)},
     ),
+    "two-models-one-column": (
+        [("a", "prompt", "b-model", 0, 4), ("b", "prompt", "a-model", 2, 6)],
+        {"column 'prompt'": ("a-model,b-model", 6.0, 14.0, 70.0, 2)},
+    ),
 }
 
 
@@ -871,12 +875,19 @@ def test_reporter_counts_lease_open_at_end_and_unsubscribes_on_close(caplog: pyt
             _lease_event("request_lease_acquired", time.monotonic() - 3.0, "a", _wait_correlation())
         )
         reporter.log_final()
-        emit_request_admission_event(_lease_event("request_lease_acquired", time.monotonic(), "b", _wait_correlation()))
 
     ((models, wait, _idle, _pct, requests),) = _wait_lines(caplog).values()
     assert models == "nemotron"
     assert requests == 1
     assert 2.5 < wait < 4.0
+
+    # A reporter still subscribed after close() would count this lease from a later run.
+    emit_request_admission_event(_lease_event("request_lease_acquired", time.monotonic(), "b", _wait_correlation()))
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        reporter._log_request_wait()  # noqa: SLF001
+    ((_models, _wait, _idle, _pct, requests),) = _wait_lines(caplog).values()
+    assert requests == 1
 
 
 def test_reporter_sanitizes_column_labels_in_request_wait_block(caplog: pytest.LogCaptureFixture) -> None:
