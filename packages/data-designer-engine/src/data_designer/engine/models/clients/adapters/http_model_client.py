@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
+import inspect
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 import data_designer.lazy_heavy_imports as lazy
@@ -57,11 +60,37 @@ class HttpModelClient(ABC):
         transport: RetryTransport | None = None,
         sync_client: httpx.Client | None = None,
         async_client: httpx.AsyncClient | None = None,
+        event_hooks: Mapping[str, list[Callable[..., Any]]] | None = None,
     ) -> None:
         if concurrency_mode == ClientConcurrencyMode.SYNC and async_client is not None:
             raise ValueError("async_client must not be provided for a sync-mode HttpModelClient")
         if concurrency_mode == ClientConcurrencyMode.ASYNC and sync_client is not None:
             raise ValueError("sync_client must not be provided for an async-mode HttpModelClient")
+        if event_hooks and (sync_client is not None or async_client is not None):
+            raise ValueError(
+                "event_hooks must not be combined with an injected sync_client/async_client; set them on that client"
+            )
+        # httpx silently drops keys other than "request"/"response", so a typo would disable the hook.
+        if unknown := set(event_hooks or {}) - {"request", "response"}:
+            raise ValueError(f"event_hooks keys must be 'request' or 'response'; got {sorted(unknown)}")
+        is_async = concurrency_mode == ClientConcurrencyMode.ASYNC
+        for name, hooks in (event_hooks or {}).items():
+            if not isinstance(hooks, (list, tuple)):
+                raise ValueError(f"event_hooks[{name!r}] must be a list of callables; got {hooks!r}")
+            for hook in hooks:
+                if not callable(hook):
+                    raise ValueError(f"event_hooks[{name!r}] entries must be callable; got {hook!r}")
+                if _is_async_callable(hook) != is_async:
+                    raise ValueError(
+                        f"event_hooks for {concurrency_mode.value}-mode clients must be "
+                        f"{'async' if is_async else 'sync'} callables; got {hook!r}"
+                    )
+        # Copy so later mutation of the caller's mapping can't add hooks before the lazy client exists.
+        event_hooks = (
+            {name: [_wrap_event_hook(hook, is_async) for hook in hooks] for name, hooks in event_hooks.items()}
+            if event_hooks
+            else None
+        )
 
         self.provider_name = provider_name
         self._endpoint = endpoint.rstrip("/")
@@ -80,6 +109,7 @@ class HttpModelClient(ABC):
         self._transport: RetryTransport | None = transport
         self._client: httpx.Client | None = sync_client
         self._aclient: httpx.AsyncClient | None = async_client
+        self._event_hooks = event_hooks
         self._init_lock = threading.Lock()
         self._closed = False
         self._close_future: asyncio.Future[list[None | BaseException]] | None = None
@@ -114,6 +144,7 @@ class HttpModelClient(ABC):
                 self._client = lazy.httpx.Client(
                     transport=self._transport,
                     timeout=lazy.httpx.Timeout(self._timeout_s),
+                    event_hooks=self._event_hooks,
                 )
             return self._client
 
@@ -133,6 +164,7 @@ class HttpModelClient(ABC):
                 self._aclient = lazy.httpx.AsyncClient(
                     transport=self._transport,
                     timeout=lazy.httpx.Timeout(self._timeout_s),
+                    event_hooks=self._event_hooks,
                 )
             return self._aclient
 
@@ -224,3 +256,37 @@ class HttpModelClient(ABC):
                 response=response, provider_name=self.provider_name, model_name=model_name
             )
         return parse_json_body(response, self.provider_name, model_name)
+
+
+class EventHookError(Exception):
+    """Raised when a user event hook fails.
+
+    The adapters classify transport exceptions by type name, so a hook raising e.g. ``ConnectionError``
+    would otherwise be reported as a retryable connection failure and resend an already-sent request.
+    """
+
+
+def _wrap_event_hook(hook: Callable[..., Any], is_async: bool) -> Callable[..., Any]:
+    if is_async:
+
+        async def async_wrapper(obj: Any) -> None:
+            try:
+                await hook(obj)
+            except Exception as exc:
+                raise EventHookError(f"event hook {hook!r} raised {type(exc).__name__}: {exc}") from exc
+
+        return async_wrapper
+
+    def sync_wrapper(obj: Any) -> None:
+        try:
+            hook(obj)
+        except Exception as exc:
+            raise EventHookError(f"event hook {hook!r} raised {type(exc).__name__}: {exc}") from exc
+
+    return sync_wrapper
+
+
+def _is_async_callable(obj: Any) -> bool:
+    while isinstance(obj, functools.partial):
+        obj = obj.func
+    return inspect.iscoroutinefunction(obj) or inspect.iscoroutinefunction(getattr(obj, "__call__", None))
