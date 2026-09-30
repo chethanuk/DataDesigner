@@ -44,7 +44,7 @@ Each layer answers a different question, and has its own owner and limit.
 | Adaptive request limit | `AdaptiveRequestAdmissionController` | `RunConfig.request_admission` | The AIMD limit for one provider/model/request type, never above the static cap |
 | HTTP connection pool | Model client adapter | Derived: `max(32, 2 × max_parallel_requests)` | Socket reuse only. It does not limit concurrency. |
 
-If several model aliases point at the same provider and model, their `max_parallel_requests` values are merged by taking the smallest. The same smallest value is used for the provider/model task slots and for the request static cap.
+If several model aliases point at the same provider and model, their `max_parallel_requests` values are merged by taking the smallest. For columns that resolve to a single endpoint, the same smallest value is used for the provider/model task slots and for the request static cap. Aliases used only by a custom column with `model_aliases`, or by a column whose aliases span several endpoints, form a `custom_model` group: they still lower the request static cap, but not the task-slot count.
 
 ---
 
