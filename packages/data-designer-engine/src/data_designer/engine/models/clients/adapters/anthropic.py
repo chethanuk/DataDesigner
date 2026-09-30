@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 from typing import Any
 
 from data_designer.engine.models.clients.adapters.anthropic_translation import (
@@ -26,6 +28,22 @@ from data_designer.engine.models.clients.types import (
     ImageGenerationResponse,
     TransportKwargs,
 )
+
+logger = logging.getLogger(__name__)
+
+# Typed ChatCompletionInferenceParams fields the Messages API has no equivalent for.
+_DROPPED_SAMPLING_PARAMS = ("presence_penalty", "min_p", "repetition_penalty")
+
+
+@functools.cache
+def warn_dropped_sampling_params(provider_name: str, model: str, params: tuple[str, ...]) -> None:
+    """Log once per (provider, model, params) so a config that sets them is not silently ignored."""
+    logger.warning(
+        "Provider %r (Anthropic Messages API) does not support %s; dropping them for model %r.",
+        provider_name,
+        ", ".join(params),
+        model,
+    )
 
 
 class AnthropicClient(HttpModelClient):
@@ -107,6 +125,8 @@ class AnthropicClient(HttpModelClient):
         raise ProviderError.unsupported_capability(provider_name=self.provider_name, operation="image-generation")
 
     def _build_payload_or_raise(self, request: ChatCompletionRequest) -> dict[str, Any]:
+        if dropped := tuple(name for name in _DROPPED_SAMPLING_PARAMS if getattr(request, name) is not None):
+            warn_dropped_sampling_params(self.provider_name, request.model, dropped)
         try:
             return build_anthropic_payload(request)
         except UnsupportedAnthropicMediaBlockError as exc:

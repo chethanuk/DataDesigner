@@ -510,7 +510,7 @@ class ChatCompletionInferenceParams(BaseInferenceParams):
     presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
     top_k: int | None = Field(default=None, ge=1)
     min_p: float | None = Field(default=None, ge=0.0, le=1.0)
-    repetition_penalty: float | None = Field(default=None, gt=0.0)
+    repetition_penalty: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
 
     @property
     def generate_kwargs(self) -> dict[str, Any]:
@@ -583,6 +583,9 @@ class ChatCompletionInferenceParams(BaseInferenceParams):
         """
         if isinstance(value, dict) and "distribution_type" in value:
             return "dist"
+        if key in ("presence_penalty", "min_p", "repetition_penalty"):
+            # These are set at 3+ digits (min_p=0.001), which two decimals would hide.
+            return f"{value:g}"
         return super()._format_value(key, value)
 
 

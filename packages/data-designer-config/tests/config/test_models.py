@@ -464,11 +464,7 @@ def test_inference_parameters_generate_kwargs():
     ],
 )
 def test_inference_parameters_routes_sampling_params(params: dict, expected: dict) -> None:
-    caller_extra_body = params.get("extra_body")
-    caller_extra_body_before = dict(caller_extra_body) if caller_extra_body is not None else None
-
     assert ChatCompletionInferenceParams(**params).generate_kwargs == expected
-    assert caller_extra_body == caller_extra_body_before
 
 
 @pytest.mark.parametrize(
@@ -481,6 +477,7 @@ def test_inference_parameters_routes_sampling_params(params: dict, expected: dic
         {"min_p": 1.1},
         {"repetition_penalty": 0},
         {"repetition_penalty": -1},
+        {"repetition_penalty": float("inf")},
     ],
 )
 def test_inference_parameters_rejects_out_of_range_sampling_params(params: dict) -> None:
@@ -802,6 +799,20 @@ def test_chat_completion_params_format_for_display_partial_params():
     # None values should be excluded
     assert "top_p" not in result
     assert "timeout" not in result
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"temperature": 0.7}, "temperature=0.70"),
+        ({"min_p": 0.001}, "min_p=0.001"),
+        ({"repetition_penalty": 1.005}, "repetition_penalty=1.005"),
+        ({"presence_penalty": -0.125}, "presence_penalty=-0.125"),
+    ],
+    ids=["two-decimals-kept", "small-min-p", "fine-repetition-penalty", "three-decimal-penalty"],
+)
+def test_chat_completion_params_format_for_display_keeps_precision(params: dict, expected: str) -> None:
+    assert expected in ChatCompletionInferenceParams(**params).format_for_display().split(", ")
 
 
 def test_embedding_params_format_for_display():

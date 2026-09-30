@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,7 +11,7 @@ import pytest
 
 from data_designer.config.models import ChatCompletionInferenceParams
 from data_designer.engine.mcp.errors import MCPConfigurationError, MCPToolError
-from data_designer.engine.models.clients.adapters.anthropic import AnthropicClient
+from data_designer.engine.models.clients.adapters.anthropic import AnthropicClient, warn_dropped_sampling_params
 from data_designer.engine.models.clients.adapters.http_model_client import ClientConcurrencyMode
 from data_designer.engine.models.clients.adapters.openai_compatible import OpenAICompatibleClient
 from data_designer.engine.models.clients.errors import ProviderError, ProviderErrorKind
@@ -354,6 +355,27 @@ async def test_agenerate_sends_sampling_params_in_body(
     await facade.agenerate(prompt="does not matter", parser=lambda x: x, **_call_kwargs(call_extra_body))
 
     _assert_sampling_params_payload(http_client, expected, absent)
+
+
+def test_anthropic_warns_once_per_model_about_dropped_sampling_params(
+    stub_model_configs: list[Any],
+    stub_model_provider_registry: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    warn_dropped_sampling_params.cache_clear()
+    http_client = make_mock_sync_client(_ANTHROPIC_TEXT_RESPONSE)
+    facade = _make_sampling_params_facade(
+        stub_model_configs, stub_model_provider_registry, AnthropicClient, http_client, None
+    )
+
+    with caplog.at_level(logging.WARNING):
+        facade.generate(prompt="first", parser=lambda x: x)
+        facade.generate(prompt="second", parser=lambda x: x)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert all(name in warnings[0] for name in ("min_p", "presence_penalty", "repetition_penalty"))
+    assert "top_k" not in warnings[0]
 
 
 @pytest.mark.asyncio
