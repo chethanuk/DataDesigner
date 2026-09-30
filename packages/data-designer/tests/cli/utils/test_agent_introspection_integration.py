@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from data_designer.cli.repositories.model_repository import ModelConfigRegistry, ModelRepository
 from data_designer.cli.repositories.provider_repository import ModelProviderRegistry, ProviderRepository
 from data_designer.cli.utils.agent_introspection import (
+    AgentIntrospectionError,
     get_context,
     get_model_aliases_state,
     get_persona_datasets_state,
@@ -132,3 +135,13 @@ def test_get_context_returns_self_describing_payload(tmp_path: Path) -> None:
     assert "config_module_path" in payload
     assert "library_version" in payload
     assert all("files" in f for f in payload["families"])
+
+
+def test_get_model_aliases_state_reports_an_invalid_config_toml(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text("version = 1\n[[model.providers]\n")
+
+    with pytest.raises(AgentIntrospectionError) as exc_info:
+        get_model_aliases_state(tmp_path)
+
+    assert exc_info.value.code == "invalid_user_config"
+    assert "Invalid TOML in" in exc_info.value.message

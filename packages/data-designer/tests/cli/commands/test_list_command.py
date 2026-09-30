@@ -179,3 +179,23 @@ def test_display_empty_list_defined_in_config_toml_points_to_config_toml(
     mock_print_warning.assert_called_once_with(
         f"{what} have not been configured. Edit {user_config_file} to configure them."
     )
+
+
+@pytest.mark.parametrize(
+    "display, repository_cls, yaml_file, yaml_list",
+    [
+        pytest.param(display_providers, ProviderRepository, "model_providers.yaml", "providers", id="providers"),
+        pytest.param(display_models, ModelRepository, "model_configs.yaml", "model_configs", id="models"),
+        pytest.param(display_mcp_providers, MCPProviderRepository, "mcp_providers.yaml", "providers", id="mcp"),
+        pytest.param(display_tool_configs, ToolRepository, "tool_configs.yaml", "tool_configs", id="tools"),
+    ],
+)
+@patch("data_designer.cli.commands.list.print_warning")
+@patch("data_designer.cli.ui.console.print")
+def test_display_empty_list_in_legacy_yaml_renders_an_empty_table(
+    mock_console_print, mock_print_warning, tmp_path: Path, display, repository_cls, yaml_file: str, yaml_list: str
+) -> None:
+    (tmp_path / yaml_file).write_text(f"{yaml_list}: []\n")
+    display(repository_cls(tmp_path))
+    mock_print_warning.assert_not_called()
+    assert isinstance(mock_console_print.call_args_list[0].args[0], Table)

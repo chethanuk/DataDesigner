@@ -78,4 +78,7 @@ def load_user_config(file_path: Path) -> UserConfig | None:
     try:
         return UserConfig.model_validate(content)
     except ValidationError as e:
-        raise InvalidUserConfigError(f"Invalid user configuration in {file_path}: {e}") from e
+        # Locations and messages only, and no chained ValidationError: pydantic echoes input values, which can
+        # include an api_key, and a traceback prints the chained cause too.
+        errors = "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors(include_input=False))
+        raise InvalidUserConfigError(f"Invalid user configuration in {file_path}: {errors}") from None

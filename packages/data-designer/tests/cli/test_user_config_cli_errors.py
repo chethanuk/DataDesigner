@@ -47,6 +47,40 @@ def test_cli_reports_a_malformed_config_toml_without_a_traceback(tmp_path: Path,
 
 
 @pytest.mark.parametrize(
+    "config_toml, expected_in_output",
+    [
+        pytest.param(
+            'version = 1\n[[model.configs]]\nalias = "[/x]"\nmodel = "m"\n',
+            "model.configs.0.provider",
+            id="markup-like-value",
+        ),
+        pytest.param('version = "[/x]"\n', "version must be an integer, got '[/x]'", id="markup-like-message"),
+    ],
+)
+def test_cli_prints_a_config_toml_schema_error_verbatim(
+    tmp_path: Path, config_toml: str, expected_in_output: str
+) -> None:
+    # The message is shown as plain text: Rich markup parsing would crash on `[/x]` or swallow bracketed text.
+    (tmp_path / "config.toml").write_text(config_toml, encoding="utf-8")
+    env = {**os.environ, "DATA_DESIGNER_HOME": str(tmp_path), "COLUMNS": "200"}
+
+    result = subprocess.run(
+        [sys.executable, "-c", _RUN_CLI, "config", "list"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert "Invalid user configuration in" in output
+    assert expected_in_output in output
+    assert "Traceback" not in output
+
+
+@pytest.mark.parametrize(
     "config_toml, expected_in_output, not_expected_in_output",
     [
         pytest.param(None, [], ["User configuration file", "toml-text"], id="no-config-toml"),

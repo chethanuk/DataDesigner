@@ -211,6 +211,8 @@ class ProviderController:
 
             print_warning(f"Provider '{selected_name}' has {model_count} associated model config(s): {model_aliases}")
             console.print()
+            if not self._model_configs_writable():
+                return
 
             # Ask if user wants to delete provider and associated models
             if confirm_action(
@@ -259,6 +261,8 @@ class ProviderController:
             model_count = len(associated_models)
             print_warning(f"Deleting all providers will also affect {model_count} associated model config(s)")
             console.print()
+            if not self._model_configs_writable():
+                return
 
             if confirm_action(
                 f"⚠️  Delete ALL ({provider_count}) provider(s): {provider_names} and {model_count} associated model(s)?\n   This action cannot be undone.",
@@ -287,6 +291,15 @@ class ProviderController:
                     print_success(f"All ({provider_count}) provider(s) deleted successfully")
                 except Exception as e:
                     print_error(f"Failed to delete all providers: {e}")
+
+    def _model_configs_writable(self) -> bool:
+        """Refuse a cascade into model configs that config.toml defines before asking to confirm it."""
+        try:
+            self.model_repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return False
+        return True
 
     def _select_provider(self, providers: list[ModelProvider], prompt: str, default: str | None = None) -> str | None:
         """Helper to select a provider from list."""

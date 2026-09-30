@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import traceback
 from pathlib import Path
 
 import pytest
@@ -161,3 +162,17 @@ def test_load_user_config_reports_an_unsearchable_parent_directory(tmp_path: Pat
         home.chmod(0o700)
 
     assert str(path) in str(exc_info.value)
+
+
+def test_load_user_config_error_does_not_echo_input_values(tmp_path: Path) -> None:
+    # A single-bracket table instead of [[model.providers]] makes pydantic reject the whole provider dict.
+    path = _write(
+        tmp_path,
+        'version = 1\n[model.providers]\nname = "n"\nendpoint = "http://x"\napi_key = "sk-live-SECRET"\n',
+    )
+
+    with pytest.raises(InvalidUserConfigError) as exc_info:
+        load_user_config(path)
+
+    assert "model.providers" in str(exc_info.value)
+    assert "sk-live-SECRET" not in "".join(traceback.format_exception(exc_info.value))

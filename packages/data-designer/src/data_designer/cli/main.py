@@ -8,6 +8,7 @@ import sys
 from typing import TextIO
 
 import typer
+from rich.markup import escape
 
 from data_designer.cli.agent_command_defs import AGENT_COMMANDS
 from data_designer.cli.lazy_group import create_lazy_typer_group
@@ -285,7 +286,8 @@ def main() -> None:
         app()
     except InvalidUserConfigError as e:
         # Every config command reads config.toml, so report a broken file once, here, not as a traceback.
-        print_error(str(e))
+        # Escaped: the message quotes the path and TOML/schema text, which Rich would otherwise parse as markup.
+        print_error(escape(str(e)))
         raise SystemExit(1) from None
 
 

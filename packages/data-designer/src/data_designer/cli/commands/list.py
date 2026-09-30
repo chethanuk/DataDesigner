@@ -53,6 +53,11 @@ def _mask_api_key(api_key: str | None) -> str:
     return "***" + api_key[-4:] if len(api_key) > 4 else "***"
 
 
+def _is_empty_config_toml_list(repo: UserConfigSectionRepository, items: list) -> bool:
+    # An empty list in a legacy YAML file still renders an empty table, as before config.toml existed.
+    return not items and repo.source_file == repo.user_config_file
+
+
 def _print_not_configured(repo: UserConfigSectionRepository, what: str, command: str) -> None:
     # `data-designer config <command>` refuses a list config.toml defines, so point there instead.
     if repo.source_file == repo.user_config_file:
@@ -96,7 +101,7 @@ def display_providers(provider_repo: ProviderRepository) -> None:
     try:
         provider_registry = provider_repo.load()
 
-        if not provider_registry or not provider_registry.providers:
+        if not provider_registry or _is_empty_config_toml_list(provider_repo, provider_registry.providers):
             _print_not_configured(provider_repo, "Providers", "providers")
             return
 
@@ -136,7 +141,7 @@ def display_models(model_repo: ModelRepository) -> None:
     try:
         registry = model_repo.load()
 
-        if not registry or not registry.model_configs:
+        if not registry or _is_empty_config_toml_list(model_repo, registry.model_configs):
             _print_not_configured(model_repo, "Models", "models")
             return
 
@@ -178,7 +183,7 @@ def display_mcp_providers(mcp_provider_repo: MCPProviderRepository) -> None:
     try:
         registry = mcp_provider_repo.load()
 
-        if not registry or not registry.providers:
+        if not registry or _is_empty_config_toml_list(mcp_provider_repo, registry.providers):
             _print_not_configured(mcp_provider_repo, "MCP providers", "mcp")
             return
 
@@ -229,7 +234,7 @@ def display_tool_configs(tool_repo: ToolRepository) -> None:
     try:
         registry = tool_repo.load()
 
-        if not registry or not registry.tool_configs:
+        if not registry or _is_empty_config_toml_list(tool_repo, registry.tool_configs):
             _print_not_configured(tool_repo, "Tool configs", "tools")
             return
 
