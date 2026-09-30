@@ -158,8 +158,8 @@ install-dev:
 	@echo ""
 	@echo "💡 Next steps:"
 	@echo "   make verify-imports     - Verify all packages are working"
-	@echo "   make test               - Run all tests across packages"
-	@echo "   make test-<pkg>         - Run tests for specific package (config, engine, interface)"
+	@echo "   make test               - Run all tests (packages + .agents/tools)"
+	@echo "   make test-<pkg>         - Run tests for specific package (config, engine, interface, agent-tools)"
 	@echo "   make lint               - Lint all code"
 	@echo "   make build              - Build all package wheels"
 

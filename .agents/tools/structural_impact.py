@@ -44,7 +44,7 @@ _KNOWN_PACKAGE_DIRS = frozenset(p.parts[1] for p in _PACKAGE_SUBDIRS)
 _STDLIB_LABELS = {"ABC", "BaseModel", "Enum", "Field"}
 
 
-def _collect_source_files(repo_root: Path) -> list[Path]:
+def collect_source_files(repo_root: Path) -> list[Path]:
     files: list[Path] = []
     for d in [repo_root / sub for sub in _PACKAGE_SUBDIRS]:
         if d.exists():
@@ -52,7 +52,7 @@ def _collect_source_files(repo_root: Path) -> list[Path]:
     return sorted(files)
 
 
-def _unknown_package_dirs(paths: list[Path], repo_root: Path) -> list[str]:
+def unknown_package_dirs(paths: list[Path], repo_root: Path) -> list[str]:
     """Return distinct package directory names under packages/ that are not in _KNOWN_PACKAGE_DIRS."""
     found: set[str] = set()
     for p in paths:
@@ -61,12 +61,12 @@ def _unknown_package_dirs(paths: list[Path], repo_root: Path) -> list[str]:
         except ValueError:
             continue
         parts = rel.parts
-        if len(parts) >= 2 and parts[0] == "packages" and parts[1] not in _KNOWN_PACKAGE_DIRS:
+        if len(parts) > 2 and parts[0] == "packages" and parts[1] not in _KNOWN_PACKAGE_DIRS:
             found.add(parts[1])
     return sorted(found)
 
 
-def _get_package(filepath: str) -> str:
+def get_package(filepath: str) -> str:
     if "data-designer-engine" in filepath:
         return "engine"
     if "data-designer-config" in filepath:
@@ -85,7 +85,7 @@ def _rel(filepath: str, repo_root: Path) -> str:
         return filepath
 
 
-def _dedup(items: list[dict], keys: tuple[str, ...] = ("from_label", "to_label", "relation")) -> list[dict]:
+def dedup(items: list[dict], keys: tuple[str, ...] = ("from_label", "to_label", "relation")) -> list[dict]:
     seen: set[tuple[str, ...]] = set()
     out: list[dict] = []
     for e in items:
@@ -128,8 +128,8 @@ def _cross_package_edges(G: Any, node_ids: set[str] | None = None) -> tuple[list
     )
 
     for u, v, data in edges:
-        u_pkg = _get_package(G.nodes[u].get("source_file", ""))
-        v_pkg = _get_package(G.nodes[v].get("source_file", ""))
+        u_pkg = get_package(G.nodes[u].get("source_file", ""))
+        v_pkg = get_package(G.nodes[v].get("source_file", ""))
         if not u_pkg or not v_pkg or u_pkg == v_pkg:
             continue
         relation = data.get("relation", "?")
@@ -220,7 +220,7 @@ def _fmt_cross_pkg(items: list[dict], limit: int = 6) -> list[str]:
 def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_files: list[Path] | None = None) -> str:
     """PR review: analyze changed files against full codebase."""
     t0 = time.monotonic()
-    analysis = _build_graph(_collect_source_files(repo_root))
+    analysis = _build_graph(collect_source_files(repo_root))
     G, communities, gods = analysis.graph, analysis.communities, analysis.god_nodes
 
     changed_paths = {str(p.resolve()) for p in changed_files}
@@ -248,7 +248,7 @@ def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_file
     )
 
     cross_pkg, violations, _ = _cross_package_edges(G, changed_node_ids)
-    unique_cross, unique_violations = _dedup(cross_pkg), _dedup(violations)
+    unique_cross, unique_violations = dedup(cross_pkg), dedup(violations)
 
     n_deleted = len(deleted_files) if deleted_files else 0
 
@@ -275,7 +275,7 @@ def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_file
 
     elapsed = time.monotonic() - t0
     file_count = len(changed_files) + n_deleted
-    unknown_pkgs = _unknown_package_dirs(list(changed_files) + list(deleted_files or []), repo_root)
+    unknown_pkgs = unknown_package_dirs(list(changed_files) + list(deleted_files or []), repo_root)
     lines = [
         f"### Structural Impact _(graphify, {elapsed:.1f}s)_",
         "",
@@ -303,13 +303,13 @@ def _changed_files_mode(changed_files: list[Path], repo_root: Path, deleted_file
 def _full_mode(repo_root: Path, previous_graph_path: str | None = None) -> str:
     """Structure audit: full codebase analysis with optional diff."""
     t0 = time.monotonic()
-    analysis = _build_graph(_collect_source_files(repo_root))
+    analysis = _build_graph(collect_source_files(repo_root))
     G, communities, gods = analysis.graph, analysis.communities, analysis.god_nodes
     elapsed = time.monotonic() - t0
 
     ranked_gods = [{"rank": i, **g} for i, g in enumerate(gods[:10], 1)]
     cross_pkg, violations, direction_counts = _cross_package_edges(G)
-    unique_violations = _dedup(violations)
+    unique_violations = dedup(violations)
 
     lines = [
         f"### Structural Analysis _(graphify, {elapsed:.1f}s)_",
