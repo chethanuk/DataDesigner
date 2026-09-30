@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from data_designer.cli.forms.tool_builder import ToolFormBuilder
+from data_designer.cli.repositories.base import UserConfigSectionReadOnlyError
 from data_designer.cli.repositories.mcp_provider_repository import MCPProviderRepository
 from data_designer.cli.repositories.tool_repository import ToolRepository
 from data_designer.cli.services.mcp_provider_service import MCPProviderService
@@ -50,6 +51,13 @@ class ToolController:
 
         print_info(f"Configuration directory: {self.config_dir}")
         console.print()
+
+        # Every mode below writes, so refuse up front rather than after a form or a partial cascade.
+        try:
+            self.repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return
 
         # Check for existing configuration
         tool_configs = self.service.list_all()

@@ -32,6 +32,8 @@ Config management commands (models, providers, MCP providers, tools) follow a co
 | **Repository** | File I/O for typed config registries | `ModelRepository` extends `ConfigRepository[ModelConfigRegistry]` |
 
 Repositories: `ModelRepository`, `ProviderRepository`, `MCPProviderRepository`, and `ToolRepository`.
+They extend `UserConfigSectionRepository`: a list defined in `DATA_DESIGNER_HOME/config.toml` wins over the
+per-concern YAML file, and writes to such a list are refused because `config.toml` is read-only for now.
 `PersonaRepository` provides read-only locale metadata for managed persona dataset downloads.
 
 Services mirror the repository domains with business logic (validation, conflict resolution).

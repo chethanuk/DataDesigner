@@ -7,8 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from data_designer.cli.repositories.base import ConfigRepository
+from data_designer.cli.repositories.base import UserConfigSectionRepository
 from data_designer.config.mcp import MCPProviderT
+from data_designer.config.user_config import UserConfig
 from data_designer.config.utils.constants import MCP_PROVIDERS_FILE_NAME
 from data_designer.config.utils.io_helpers import load_config_file, save_config_file
 
@@ -23,17 +24,22 @@ class MCPProviderRegistry(BaseModel):
     providers: list[MCPProviderT]
 
 
-class MCPProviderRepository(ConfigRepository[MCPProviderRegistry]):
+class MCPProviderRepository(UserConfigSectionRepository[MCPProviderRegistry]):
     """Repository for MCP provider configurations."""
+
+    user_config_section = "mcp.providers"
 
     @property
     def config_file(self) -> Path:
         """Get the MCP provider configuration file path."""
         return self.config_dir / MCP_PROVIDERS_FILE_NAME
 
-    def load(self) -> MCPProviderRegistry | None:
+    def _from_user_config(self, user_config: UserConfig) -> MCPProviderRegistry | None:
+        return None if user_config.mcp.providers is None else MCPProviderRegistry(providers=user_config.mcp.providers)
+
+    def _load_legacy(self) -> MCPProviderRegistry | None:
         """Load MCP provider configuration from file."""
-        if not self.exists():
+        if not self.config_file.exists():
             return None
 
         try:
@@ -42,7 +48,7 @@ class MCPProviderRepository(ConfigRepository[MCPProviderRegistry]):
         except Exception:
             return None
 
-    def save(self, config: MCPProviderRegistry) -> None:
+    def _save_legacy(self, config: MCPProviderRegistry) -> None:
         """Save MCP provider configuration to file."""
         config_dict = config.model_dump(mode="json", exclude_none=True)
         save_config_file(self.config_file, config_dict)

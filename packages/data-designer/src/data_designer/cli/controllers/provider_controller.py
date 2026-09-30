@@ -12,6 +12,7 @@ from data_designer.cli.forms.provider_builder import ProviderFormBuilder
 
 # Pattern for valid environment variable names (uppercase letters, digits, underscores, not starting with digit)
 _ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+from data_designer.cli.repositories.base import UserConfigSectionReadOnlyError
 from data_designer.cli.repositories.model_repository import ModelRepository
 from data_designer.cli.repositories.provider_repository import ProviderRepository
 from data_designer.cli.services.model_service import ModelService
@@ -47,6 +48,13 @@ class ProviderController:
         print_header("Configure Model Providers")
         print_info(f"Configuration directory: {self.config_dir}")
         console.print()
+
+        # Every mode below writes, so refuse up front rather than after a form or a partial cascade.
+        try:
+            self.repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return
 
         # Check for existing configuration
         providers = self.service.list_all()
@@ -203,6 +211,8 @@ class ProviderController:
 
             print_warning(f"Provider '{selected_name}' has {model_count} associated model config(s): {model_aliases}")
             console.print()
+            if not self._model_configs_writable():
+                return
 
             # Ask if user wants to delete provider and associated models
             if confirm_action(
@@ -251,6 +261,8 @@ class ProviderController:
             model_count = len(associated_models)
             print_warning(f"Deleting all providers will also affect {model_count} associated model config(s)")
             console.print()
+            if not self._model_configs_writable():
+                return
 
             if confirm_action(
                 f"⚠️  Delete ALL ({provider_count}) provider(s): {provider_names} and {model_count} associated model(s)?\n   This action cannot be undone.",
@@ -279,6 +291,15 @@ class ProviderController:
                     print_success(f"All ({provider_count}) provider(s) deleted successfully")
                 except Exception as e:
                     print_error(f"Failed to delete all providers: {e}")
+
+    def _model_configs_writable(self) -> bool:
+        """Refuse a cascade into model configs that config.toml defines before asking to confirm it."""
+        try:
+            self.model_repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return False
+        return True
 
     def _select_provider(self, providers: list[ModelProvider], prompt: str, default: str | None = None) -> str | None:
         """Helper to select a provider from list."""

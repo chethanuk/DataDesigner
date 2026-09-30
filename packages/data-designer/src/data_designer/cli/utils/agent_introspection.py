@@ -18,6 +18,7 @@ from data_designer.cli.repositories.provider_repository import ProviderRepositor
 from data_designer.cli.services.download_service import DownloadService
 from data_designer.config.column_types import ColumnConfigT
 from data_designer.config.default_model_settings import get_providers_with_missing_api_keys
+from data_designer.config.errors import InvalidUserConfigError
 from data_designer.config.processor_types import ProcessorConfigT
 from data_designer.config.sampler_constraints import ColumnConstraintT
 from data_designer.config.sampler_params import SamplerParamsT
@@ -293,10 +294,16 @@ def _get_source_file(cls: type) -> str:
 
 
 def _load_registry(repo: Any) -> Any:
-    if not repo.exists():
-        return None
     try:
+        if not repo.exists():
+            return None
         registry = repo.load()
+    except InvalidUserConfigError as e:
+        raise AgentIntrospectionError(
+            code="invalid_user_config",
+            message=str(e),
+            details={"config_file": str(repo.user_config_file)},
+        ) from e
     except LegacyModelConfigMigrationError as e:
         raise AgentIntrospectionError(
             code="legacy_model_config",
