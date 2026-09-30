@@ -998,3 +998,12 @@ def test_concurrent_data_designer_creates_share_one_exporter(
     )
     assert generated_line.endswith(" 2.0")
     assert completed_line.endswith(" 2.0")
+
+
+def test_stdlib_server_annotation_resolves_at_runtime() -> None:
+    # STYLEGUIDE: stdlib imports stay at runtime, so get_type_hints can resolve WSGIServer.
+    import typing
+
+    hints = typing.get_type_hints(opentelemetry._stop_server)
+
+    assert "server" in hints

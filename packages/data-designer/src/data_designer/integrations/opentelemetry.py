@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping
 from enum import Enum
 from typing import TYPE_CHECKING
+from wsgiref.simple_server import WSGIServer
 
 from data_designer.config.version import get_library_version
 from data_designer.engine.observability import (
@@ -25,8 +26,6 @@ from data_designer.engine.observability import (
 )
 
 if TYPE_CHECKING:
-    from wsgiref.simple_server import WSGIServer
-
     from opentelemetry.metrics import Counter, Histogram, ObservableGauge, UpDownCounter
     from opentelemetry.sdk.metrics import MeterProvider
     from prometheus_client import CollectorRegistry
