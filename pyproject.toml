@@ -33,9 +33,13 @@ package = false
 required-version = ">=0.7.10"
 
 [tool.uv.sources]
-# Temporary immutable pin to jupyter/nbconvert#2300, which replaces the EOL
-# Bleach dependency with nh3. Return to PyPI after the upstream fix is released.
-nbconvert = { git = "https://github.com/jupyter/nbconvert.git", rev = "1fab6813f44f89017e7bcad27578571447b5b9c2" }
+# Temporary pin to jupyter/nbconvert#2300 (rev 1fab6813f44f89017e7bcad27578571447b5b9c2),
+# which replaces the EOL Bleach dependency with nh3. Return to PyPI after the upstream
+# fix is released. Vendored as a wheel because that rev's hatch_build.py downloads CSS from
+# cdn.jupyter.org at build time and the CDN is down (HTTP 522, jupyter/nbconvert#1541).
+# Rebuild: check out the rev, put the `notebook==5.4.0` wheel's
+# notebook/static/style/style.min.css at share/templates/classic/static/style.css, `uv build --wheel`.
+nbconvert = { path = "vendor/nbconvert-7.17.1-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [

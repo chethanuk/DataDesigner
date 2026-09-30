@@ -118,3 +118,6 @@ fern/components/notebooks/*.ts
 
 # Graphify structural analysis cache (CI-only, cached via actions/cache)
 graphify-out/
+
+# Vendored nbconvert wheel (see [tool.uv.sources] in pyproject.toml)
+!vendor/nbconvert-*.whl

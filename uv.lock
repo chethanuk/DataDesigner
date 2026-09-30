@@ -1015,7 +1015,7 @@ notebooks = [
     { name = "jupyter-server", specifier = ">=2.20.0,<3" },
     { name = "jupyterlab", specifier = ">=4.6.0a5,<5" },
     { name = "mistune", specifier = ">=3.3.3,<4" },
-    { name = "nbconvert", git = "https://github.com/jupyter/nbconvert.git?rev=1fab6813f44f89017e7bcad27578571447b5b9c2" },
+    { name = "nbconvert", path = "vendor/nbconvert-7.17.1-py3-none-any.whl" },
     { name = "notebook", specifier = ">=7.6.0a5,<8" },
     { name = "setuptools", specifier = ">=83.0.0,<84" },
     { name = "soupsieve", specifier = ">=2.9.1,<3" },
@@ -2575,7 +2575,7 @@ wheels = [
 [[package]]
 name = "nbconvert"
 version = "7.17.1"
-source = { git = "https://github.com/jupyter/nbconvert.git?rev=1fab6813f44f89017e7bcad27578571447b5b9c2#1fab6813f44f89017e7bcad27578571447b5b9c2" }
+source = { path = "vendor/nbconvert-7.17.1-py3-none-any.whl" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "defusedxml" },
@@ -2592,6 +2592,59 @@ dependencies = [
     { name = "pygments" },
     { name = "traitlets" },
 ]
+wheels = [
+    { filename = "nbconvert-7.17.1-py3-none-any.whl", hash = "sha256:89e2885594cfdff5c8a1e7f13f170ce643622b6213f65ef27e14c45d9c6ba138" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4" },
+    { name = "defusedxml" },
+    { name = "flaky", marker = "extra == 'all'" },
+    { name = "flaky", marker = "extra == 'test'" },
+    { name = "importlib-metadata", marker = "python_full_version < '3.10'", specifier = ">=3.6" },
+    { name = "intersphinx-registry", marker = "extra == 'all'" },
+    { name = "intersphinx-registry", marker = "extra == 'docs'" },
+    { name = "ipykernel", marker = "extra == 'all'" },
+    { name = "ipykernel", marker = "extra == 'docs'" },
+    { name = "ipykernel", marker = "extra == 'test'" },
+    { name = "ipython", marker = "extra == 'all'" },
+    { name = "ipython", marker = "extra == 'docs'" },
+    { name = "ipywidgets", marker = "extra == 'all'", specifier = ">=7.5" },
+    { name = "ipywidgets", marker = "extra == 'test'", specifier = ">=7.5" },
+    { name = "jinja2", specifier = ">=3.0" },
+    { name = "jupyter-core", specifier = ">=4.7" },
+    { name = "jupyterlab-pygments" },
+    { name = "markupsafe", specifier = ">=2.0" },
+    { name = "mistune", specifier = ">=2.0.3,<4" },
+    { name = "myst-parser", marker = "extra == 'all'" },
+    { name = "myst-parser", marker = "extra == 'docs'" },
+    { name = "nbclient", specifier = ">=0.5.0" },
+    { name = "nbformat", specifier = ">=5.7" },
+    { name = "nbsphinx", marker = "extra == 'all'", specifier = ">=0.2.12" },
+    { name = "nbsphinx", marker = "extra == 'docs'", specifier = ">=0.2.12" },
+    { name = "nh3", specifier = ">=0.3.0" },
+    { name = "packaging" },
+    { name = "pandocfilters", specifier = ">=1.4.1" },
+    { name = "playwright", marker = "extra == 'all'" },
+    { name = "playwright", marker = "extra == 'webpdf'" },
+    { name = "pydata-sphinx-theme", marker = "extra == 'all'" },
+    { name = "pydata-sphinx-theme", marker = "extra == 'docs'" },
+    { name = "pygments", specifier = ">=2.4.1" },
+    { name = "pyqtwebengine", marker = "extra == 'all'", specifier = ">=5.15" },
+    { name = "pyqtwebengine", marker = "extra == 'qtpdf'", specifier = ">=5.15" },
+    { name = "pyqtwebengine", marker = "extra == 'qtpng'", specifier = ">=5.15" },
+    { name = "pytest", marker = "extra == 'all'", specifier = ">=7" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+    { name = "sphinx", marker = "extra == 'all'", specifier = ">=5.0.2" },
+    { name = "sphinx", marker = "extra == 'docs'", specifier = ">=5.0.2" },
+    { name = "sphinxcontrib-spelling", marker = "extra == 'all'" },
+    { name = "sphinxcontrib-spelling", marker = "extra == 'docs'" },
+    { name = "tornado", marker = "extra == 'all'", specifier = ">=6.1" },
+    { name = "tornado", marker = "extra == 'serve'", specifier = ">=6.1" },
+    { name = "traitlets", specifier = ">=5.1" },
+]
+provides-extras = ["all", "docs", "qtpdf", "qtpng", "serve", "test", "webpdf"]
 
 [[package]]
 name = "nbformat"
