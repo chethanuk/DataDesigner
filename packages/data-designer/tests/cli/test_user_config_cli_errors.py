@@ -73,7 +73,8 @@ def test_cli_prints_a_config_toml_schema_error_verbatim(
         timeout=120,
     )
 
-    output = result.stdout + result.stderr
+    # Rich wraps long lines even at COLUMNS=200 (macOS tmp paths are long), so compare whitespace-normalized text.
+    output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode == 1, output
     assert "Invalid user configuration in" in output
     assert expected_in_output in output
