@@ -1,21 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the pure helpers in `.agents/tools/structural_impact.py`."""
+"""Tests for `.agents/tools/structural_impact.py`: its public helpers and its CLI entry point."""
 
 from __future__ import annotations
 
-import inspect
-import types
+import sys
 from pathlib import Path
 
 import pytest
 import structural_impact
 from structural_impact import (
-    _collect_source_files,
-    _dedup,
-    _get_package,
-    _unknown_package_dirs,
+    collect_source_files,
+    dedup,
+    get_package,
+    unknown_package_dirs,
 )
 
 ENGINE_SRC = "packages/data-designer-engine/src/data_designer/engine"
@@ -41,7 +40,7 @@ INTERFACE_SRC = "packages/data-designer/src/data_designer"
     ],
 )
 def test_get_package_classifies_a_path_by_its_owning_package(filepath: str, expected: str) -> None:
-    assert _get_package(filepath) == expected
+    assert get_package(filepath) == expected
 
 
 def _edge(from_label: str, to_label: str = "Target", relation: str = "imports") -> dict[str, str]:
@@ -77,12 +76,12 @@ _LONG_B = "DataDesignerColumnConfigurationValidatorBeta"
     ],
 )
 def test_dedup_keeps_entries_that_differ_anywhere_in_the_key(items: list[dict], expected: list[dict]) -> None:
-    assert _dedup(items) == expected
+    assert dedup(items) == expected
 
 
 def test_dedup_honours_a_narrower_key_tuple() -> None:
     items = [_edge("A", "T", "imports"), _edge("A", "T", "inherits")]
-    assert _dedup(items, keys=("from_label", "to_label")) == [items[0]]
+    assert dedup(items, keys=("from_label", "to_label")) == [items[0]]
 
 
 def _write(root: Path, relpath: str) -> Path:
@@ -109,7 +108,7 @@ def test_collect_source_files_finds_every_package_and_skips_hidden_and_non_pytho
     _write(repo_root, f"{ENGINE_SRC}/.hidden/skipped.py")
     (repo_root / ENGINE_SRC / "notes.txt").write_text("not python\n", encoding="utf-8")
 
-    assert _collect_source_files(repo_root) == expected
+    assert collect_source_files(repo_root) == expected
 
 
 def test_collect_source_files_tolerates_a_missing_package_directory(repo_root: Path) -> None:
@@ -121,11 +120,11 @@ def test_collect_source_files_tolerates_a_missing_package_directory(repo_root: P
     )
     assert not (repo_root / "packages" / "data-designer-config").exists()
 
-    assert _collect_source_files(repo_root) == expected
+    assert collect_source_files(repo_root) == expected
 
 
 def test_collect_source_files_returns_empty_for_an_empty_root(repo_root: Path) -> None:
-    assert _collect_source_files(repo_root) == []
+    assert collect_source_files(repo_root) == []
 
 
 @pytest.mark.parametrize(
@@ -144,9 +143,8 @@ def test_collect_source_files_returns_empty_for_an_empty_root(repo_root: Path) -
             id="multiple-unknowns-sorted",
         ),
         pytest.param(["scripts/helper.py"], [], id="outside-packages-ignored"),
-        # The check is positional - `parts[1]` under `packages/` is taken as the package name
-        # whether or not it is a directory. Pinned as the current boundary, not endorsed.
-        pytest.param(["packages/loose.py"], ["loose.py"], id="loose-file-under-packages-named"),
+        # A file directly under packages/ is not a package directory.
+        pytest.param(["packages/loose.py"], [], id="loose-file-under-packages-ignored"),
     ],
 )
 def test_unknown_package_dirs_reports_only_packages_outside_the_known_set(
@@ -154,37 +152,54 @@ def test_unknown_package_dirs_reports_only_packages_outside_the_known_set(
 ) -> None:
     paths = [_write(repo_root, rel) for rel in relpaths]
 
-    assert _unknown_package_dirs(paths, repo_root) == expected
+    assert unknown_package_dirs(paths, repo_root) == expected
 
 
 def test_unknown_package_dirs_skips_paths_outside_the_repo_root(repo_root: Path, tmp_path: Path) -> None:
     outside = tmp_path.resolve().parent / "elsewhere" / "packages" / "ghost" / "g.py"
 
-    assert _unknown_package_dirs([outside], repo_root) == []
+    assert unknown_package_dirs([outside], repo_root) == []
 
 
-def _names_read(code: types.CodeType) -> set[str]:
-    names = set(code.co_names)
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType):
-            names |= _names_read(const)
-    return names
+def _run_cli(monkeypatch: pytest.MonkeyPatch, *argv: str) -> None:
+    monkeypatch.setattr(sys, "argv", ["structural_impact.py", *argv])
+    structural_impact.main()
 
 
-def test_no_function_reads_a_module_level_repo_root() -> None:
-    """Guard for every `_REPO_ROOT` reader, including `_full_mode`'s `graphify-out` path.
+def test_full_mode_writes_graph_under_the_given_repo_root(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(repo_root, f"{CONFIG_SRC}/b.py")
+    report = repo_root / "report.md"
 
-    Python resolves a global name inside a function body at call time, so a reader left behind
-    after the global is deleted raises `NameError` only when that path runs - and `--full` is
-    exercised by a nightly agentic recipe, not by this suite. `co_names` is an exact match, so
-    `_REPO_ROOT_DEFAULT` does not count. Nested code objects (comprehensions, generator
-    expressions, lambdas) keep their own `co_names`, so they are walked too.
-    """
-    assert not hasattr(structural_impact, "_REPO_ROOT")
+    _run_cli(monkeypatch, "--full", "--repo-root", str(repo_root), "--output", str(report))
 
-    offenders = sorted(
-        fn.__name__
-        for fn in vars(structural_impact).values()
-        if inspect.isfunction(fn) and "_REPO_ROOT" in _names_read(fn.__code__)
+    assert report.read_text(encoding="utf-8").startswith("### Structural Analysis")
+    assert (repo_root / "graphify-out" / "graph.json").is_file()
+    assert (repo_root / "graphify-out" / "baselines.json").is_file()
+
+
+_BIG_CLASS = "class Big:\n" + "".join(f"    def m{i}(self) -> None: ...\n" for i in range(6))
+
+
+def test_changed_files_resolve_against_the_given_repo_root(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (repo_root / CONFIG_SRC).mkdir(parents=True)
+    (repo_root / CONFIG_SRC / "big.py").write_text(_BIG_CLASS, encoding="utf-8")
+    _write(repo_root, "packages/data-designer-plugins/src/p.py")
+    report = repo_root / "report.md"
+
+    _run_cli(
+        monkeypatch,
+        "--changed-files",
+        f"{CONFIG_SRC}/big.py",
+        "packages/data-designer-plugins/src/p.py",
+        "--repo-root",
+        str(repo_root),
+        "--output",
+        str(report),
     )
-    assert offenders == []
+
+    text = report.read_text(encoding="utf-8")
+    # Relative paths were found under --repo-root, so nothing is reported as deleted.
+    assert "deleted" not in text
+    assert "unknown package(s) (data-designer-plugins)" in text
+    # Source paths in the report are relative to --repo-root.
+    assert f"in `{CONFIG_SRC}/big.py`" in text
