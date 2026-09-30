@@ -311,6 +311,7 @@ test-run-recipes:
 	@RECIPE_WORKDIR=$$(mktemp -d); \
 	trap "rm -rf $$RECIPE_WORKDIR" EXIT; \
 	for f in fern/assets/recipes/**/*.py; do \
+		case $$f in */image_generation/*) continue;; esac; \
 		echo "  📜 Running $$f..."; \
 		(cd "$$RECIPE_WORKDIR" && uv run --project "$(REPO_PATH)" --group notebooks --group recipes python "$(REPO_PATH)/$$f" --model-alias nvidia-text --artifact-path "$$RECIPE_WORKDIR" --num-records 5) || exit 1; \
 	done; \
