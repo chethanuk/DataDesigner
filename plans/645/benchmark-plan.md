@@ -220,7 +220,7 @@ Metrics:
 | --- | --- | --- |
 | Task admission | `origin/main` or the implementation PR merge-base before `TaskAdmissionController` | task-admission PR |
 | Bounded borrow | accepted lease-only task-admission SHA | bounded-borrow PR |
-| Resource vector | accepted bounded-borrow SHA or named policy baseline | resource-vector policy PR |
+| Resource vector | accepted bounded-borrow SHA or named policy baseline (see [resource-vector-admission.md](resource-vector-admission.md#follow-up-issues)) | resource-vector policy PR |
 
 ## Evidence Thresholds
 
@@ -239,7 +239,7 @@ Scenario-specific gates:
 - Hidden-waiter proof: `max(hidden_scheduler_resource_waiters) == 0` across success, failure, cancellation, and salvage paths after task admission lands.
 - Idle/utilization proxy: ready-idle gaps while eligible work and capacity are available must be zero except for documented event-loop scheduling granularity.
 - Dynamic request benchmark: zero/one/many request tasks must produce matching output hashes, request lease counts must equal concrete outbound attempts, and request wait/execute/release timelines must be monotonic.
-- Cross-provider cooldown benchmark: provider B ready work must continue to receive scheduler task leases while provider A is blocked by request cooldown once the provider-aware policy in #651 claims that optimization.
+- Cross-provider cooldown benchmark: provider B ready work must continue to receive scheduler task leases while provider A is blocked by request cooldown once the provider-aware policy in #651 claims that optimization. The per provider/model/domain zero-inflight idle metric is defined once in [resource-vector-admission.md](resource-vector-admission.md#zero-inflight-idle-metric).
 - Variance: measured iterations must report mean, p50, p95, min, max, and standard deviation. Any acceptance claim based on timing should remain directionally true after removing the fastest and slowest measured iteration.
 
 ## CI Smoke
