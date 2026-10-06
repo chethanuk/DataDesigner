@@ -96,6 +96,10 @@ When the Data Designer library or the CLI is initialized, default model configur
   Upgrades do not overwrite existing configuration files. If `nvidia-text` still references a retired model, update `~/.data-designer/model_configs.yaml` manually or run `data-designer config reset` to restore the current defaults. Resetting deletes all custom configurations.
 </Note>
 
+<Note title="config.toml takes precedence">
+  If `~/.data-designer/config.toml` defines `model.configs` or `model.providers`, that list is used instead of the matching YAML file, even when it is empty. The CLI only reads `config.toml`, so edit it directly: `data-designer config reset` skips those lists. Entries use the same fields as the YAML files.
+</Note>
+
 <Tip>
 While these files provide a convenient way to specify settings for your model providers and configuration you use most often, they can always be set programmatically in your SDG workflow.
 </Tip>

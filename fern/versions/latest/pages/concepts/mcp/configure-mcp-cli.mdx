@@ -13,6 +13,11 @@ The CLI manages two YAML configuration files for MCP:
 - **`tool_configs.yaml`**: Tool configurations
 
 <Note>
+config.toml Takes Precedence
+If `~/.data-designer/config.toml` defines `mcp.providers` or `tools.configs`, that list is used instead of the YAML file. The CLI only reads `config.toml`: it refuses to add, update or delete entries of such a list, so edit `config.toml` directly instead.
+</Note>
+
+<Note>
 Custom Directory
 You can customize the configuration directory location with the `DATA_DESIGNER_HOME` environment variable:
 ```bash

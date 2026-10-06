@@ -205,3 +205,28 @@ def test_run_respects_delete_cancellation(
 
     # Verify no providers were deleted
     assert len(controller_with_providers.service.list_all()) == initial_count
+
+
+@pytest.mark.parametrize(
+    "select_side_effect", [["delete", "test-provider-1"], ["delete_all"]], ids=["delete", "delete_all"]
+)
+@patch("data_designer.cli.controllers.provider_controller.print_error")
+@patch("data_designer.cli.controllers.provider_controller.confirm_action", return_value=True)
+@patch("data_designer.cli.controllers.provider_controller.select_with_arrows")
+def test_run_refuses_to_cascade_into_model_configs_defined_in_config_toml(
+    mock_select: MagicMock,
+    mock_confirm: MagicMock,
+    mock_print_error: MagicMock,
+    controller_with_providers: ProviderController,
+    select_side_effect: list[str],
+) -> None:
+    (controller_with_providers.config_dir / "config.toml").write_text(
+        'version = 1\n[[model.configs]]\nalias = "a"\nmodel = "m"\nprovider = "test-provider-1"\n'
+    )
+    mock_select.side_effect = select_side_effect
+
+    controller_with_providers.run()
+
+    mock_confirm.assert_not_called()
+    assert "'model.configs' is defined in" in mock_print_error.call_args.args[0]
+    assert len(controller_with_providers.service.list_all()) == 2

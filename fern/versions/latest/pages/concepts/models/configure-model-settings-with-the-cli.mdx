@@ -13,6 +13,11 @@ The CLI manages two YAML configuration files:
 - **`model_configs.yaml`**: Model configurations
 
 <Note>
+config.toml Takes Precedence
+If `~/.data-designer/config.toml` defines `model.providers` or `model.configs`, that list is used instead of the YAML file. The CLI only reads `config.toml`: it refuses to add, update or delete entries of such a list, and `data-designer config reset` skips it. Edit `config.toml` directly instead.
+</Note>
+
+<Note>
 Automatic Configuration
 If these configuration files don't already exist, the Data Designer library automatically creates them with default settings at runtime when first initialized.
 </Note>

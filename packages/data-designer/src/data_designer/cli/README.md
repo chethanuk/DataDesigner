@@ -108,7 +108,7 @@ The CLI follows a **layered architecture** pattern, separating concerns into dis
 #### 4. **Repositories** (`repositories/`)
 - **Purpose**: Handle data persistence and read-only reference metadata
 - **Responsibilities**:
-  - Load configuration from YAML files
+  - Load configuration from YAML files, or from the matching section of `config.toml` when it defines one
   - Save configuration to YAML files
   - Check file existence and delete configuration files where applicable
   - Provide read-only metadata for built-in managed assets
@@ -129,6 +129,9 @@ class ConfigRepository(ABC, Generic[T]):
     def exists(self) -> bool: ...
     def delete(self) -> None: ...
 ```
+
+`ModelRepository`, `ProviderRepository`, `MCPProviderRepository` and `ToolRepository` extend
+`UserConfigSectionRepository`, which reads their section of `config.toml` first and falls back to the YAML file.
 
 #### 5. **Forms** (`forms/`)
 - **Purpose**: Interactive form-based data collection from users
@@ -251,6 +254,35 @@ tool_configs:
       - local-tools
     max_tool_call_turns: 5
 ```
+
+### `~/.data-designer/config.toml`
+
+Optional, versioned file that can hold any of the four lists above. Entries use the same fields as the YAML files:
+
+```toml
+version = 1
+
+[[model.providers]]
+name = "my-nim"
+endpoint = "http://localhost:8000/v1"
+provider_type = "openai"
+
+[[model.configs]]
+alias = "local-text"
+model = "meta/llama-3.1-8b-instruct"
+provider = "my-nim"
+
+[model.configs.inference_parameters]
+generation_type = "chat-completion"
+temperature = 0.7
+```
+
+The lists are `model.providers`, `model.configs`, `mcp.providers` and `tools.configs`. A list defined here, even as
+`[]`, takes precedence over its YAML file, for both the CLI and the `DataDesigner` defaults; a list left out still comes
+from the YAML file. The CLI only reads `config.toml` for now: adding, updating or deleting entries of a list it defines
+fails with a message naming the file, so edit it directly, and `config reset` skips it. `data-designer config list`
+shows the file's path when it exists. An invalid file (bad TOML, a missing or unsupported `version`, an unknown section
+or an invalid entry) is an error that names the file and the failing field.
 
 ### `~/.data-designer/managed-assets/`
 

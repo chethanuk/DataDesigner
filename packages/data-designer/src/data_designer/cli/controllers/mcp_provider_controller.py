@@ -11,6 +11,7 @@ from pathlib import Path
 _ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 from data_designer.cli.forms.mcp_provider_builder import MCPProviderFormBuilder, MCPProviderT
+from data_designer.cli.repositories.base import UserConfigSectionReadOnlyError
 from data_designer.cli.repositories.mcp_provider_repository import MCPProviderRepository
 from data_designer.cli.services.mcp_provider_service import MCPProviderService
 from data_designer.cli.ui import (
@@ -39,6 +40,13 @@ class MCPProviderController:
         print_header("Configure MCP Providers")
         print_info(f"Configuration directory: {self.config_dir}")
         console.print()
+
+        # Every mode below writes, so refuse up front rather than after a form or a partial cascade.
+        try:
+            self.repository.check_writable()
+        except UserConfigSectionReadOnlyError as e:
+            print_error(str(e))
+            return
 
         # Check for existing configuration
         providers = self.service.list_all()

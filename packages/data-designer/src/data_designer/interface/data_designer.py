@@ -18,6 +18,7 @@ from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.data_designer_config import DataDesignerConfig
 from data_designer.config.default_model_settings import (
     get_default_model_configs,
+    get_default_model_settings_file,
     get_default_providers,
     get_providers_with_missing_api_keys,
     resolve_seed_default_model_settings,
@@ -33,8 +34,6 @@ from data_designer.config.run_config import JinjaRenderingEngine, RunConfig
 from data_designer.config.utils.constants import (
     DEFAULT_NUM_RECORDS,
     MANAGED_ASSETS_PATH,
-    MODEL_CONFIGS_FILE_PATH,
-    MODEL_PROVIDERS_FILE_PATH,
 )
 from data_designer.config.utils.info import InfoType, InterfaceInfo
 from data_designer.engine.analysis.dataset_profiler import DataDesignerDatasetProfiler, DatasetProfilerConfig
@@ -589,7 +588,7 @@ class DataDesigner(DataDesignerInterface[DatasetCreationResults]):
         Returns:
             List of default model configurations.
         """
-        logger.info(f"♻️ Using default model configs from {str(MODEL_CONFIGS_FILE_PATH)!r}")
+        logger.info(f"♻️ Using default model configs from {str(get_default_model_settings_file('configs'))!r}")
         return get_default_model_configs()
 
     def get_default_model_providers(self) -> list[ModelProvider]:
@@ -598,7 +597,7 @@ class DataDesigner(DataDesignerInterface[DatasetCreationResults]):
         Returns:
             List of default model providers.
         """
-        logger.info(f"♻️ Using default model providers from {str(MODEL_PROVIDERS_FILE_PATH)!r}")
+        logger.info(f"♻️ Using default model providers from {str(get_default_model_settings_file('providers'))!r}")
         return get_default_providers()
 
     @property
@@ -626,11 +625,7 @@ class DataDesigner(DataDesignerInterface[DatasetCreationResults]):
         """Get the runtime configuration applied to dataset generation.
 
         Returns:
-            The active RunConfig instance. Note that ``RunConfig`` normalizes
-            some fields on construction (e.g., ``shutdown_error_rate`` becomes
-            ``1.0`` when ``disable_early_shutdown=True``), so the returned
-            object may not exactly equal the one originally passed to
-            ``set_run_config``.
+            The active RunConfig instance.
         """
         return self._run_config
 

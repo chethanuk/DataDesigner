@@ -48,6 +48,7 @@ def setup_mock_repository(
     mock_instance.exists.return_value = exists
     if config_file:
         mock_instance.config_file = config_file
+        mock_instance.source_file = config_file
     if delete_side_effect:
         mock_instance.delete.side_effect = delete_side_effect
     return mock_instance
