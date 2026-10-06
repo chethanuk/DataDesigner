@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from data_designer.config.models import GenerationType, ModelConfig
+from data_designer.config.utils.media_helpers import get_media_base64_context
 from data_designer.engine.model_provider import ModelProvider, ModelProviderRegistry
 from data_designer.engine.models.errors import ModelGenerationValidationFailureError
 from data_designer.engine.models.parsers.errors import ParserException
@@ -15,7 +16,7 @@ from data_designer.engine.secret_resolver import SecretResolver
 from data_designer.logging import LOG_INDENT
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     from data_designer.engine.models.clients.retry import RetryConfig
     from data_designer.engine.models.facade import ModelFacade
@@ -27,6 +28,14 @@ if TYPE_CHECKING:
     ]
 
 logger = logging.getLogger(__name__)
+
+# 64x64 white PNG (Pillow output, chunk CRCs verified) sent with the health-check prompt to models whose
+# columns take image context, since some vision models reject requests that carry no image.
+_HEALTH_CHECK_IMAGE_BLOCK = get_media_base64_context(
+    "image",
+    "image/png",
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATUlEQVR42u3PQQ0AAAgEILV/5zOFDzdoQCepz6aeExAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQELi3cqoDfaKuZM4AAAAASUVORK5CYII=",
+)
 
 
 def _parse_health_check_chat_response(response: str) -> str:
@@ -287,7 +296,13 @@ class ModelRegistry:
                 logger.error(f"{LOG_INDENT}❌ Failed!")
                 raise
 
-    async def arun_health_check(self, model_aliases: list[str]) -> None:
+    async def arun_health_check(
+        self,
+        model_aliases: list[str],
+        *,
+        image_context_aliases: Collection[str] = (),
+        text_context_aliases: Collection[str] = (),
+    ) -> None:
         """Async version of ``run_health_check`` for async-mode registries."""
         logger.info("🩺 Running health checks for models...")
         for model_alias in model_aliases:
@@ -311,15 +326,22 @@ class ModelRegistry:
                     )
                     _validate_health_check_embedding_response(vectors, model_alias=model_alias)
                 elif model.model_generation_type == GenerationType.CHAT_COMPLETION:
-                    await model.agenerate(
-                        prompt="Hello!",
-                        parser=_parse_health_check_chat_response,
-                        system_prompt="You are a helpful assistant.",
-                        max_correction_steps=0,
-                        max_conversation_restarts=0,
-                        skip_usage_tracking=True,
-                        purpose="running health checks",
-                    )
+                    # An alias shared by image and text-only columns must pass both request shapes.
+                    has_image = model_alias in image_context_aliases
+                    shapes = [[_HEALTH_CHECK_IMAGE_BLOCK]] if has_image else [None]
+                    if has_image and model_alias in text_context_aliases:
+                        shapes.append(None)
+                    for multi_modal_context in shapes:
+                        await model.agenerate(
+                            prompt="Hello!",
+                            multi_modal_context=multi_modal_context,
+                            parser=_parse_health_check_chat_response,
+                            system_prompt="You are a helpful assistant.",
+                            max_correction_steps=0,
+                            max_conversation_restarts=0,
+                            skip_usage_tracking=True,
+                            purpose="running health checks",
+                        )
                 elif model.model_generation_type == GenerationType.IMAGE:
                     await model.agenerate_image(
                         prompt="Generate a simple illustration of a thumbs up sign.",
