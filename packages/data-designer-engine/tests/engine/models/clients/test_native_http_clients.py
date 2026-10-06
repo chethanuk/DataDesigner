@@ -17,6 +17,7 @@ import pytest
 from data_designer.engine.models.clients.adapters.anthropic import AnthropicClient
 from data_designer.engine.models.clients.adapters.http_model_client import ClientConcurrencyMode
 from data_designer.engine.models.clients.adapters.openai_compatible import OpenAICompatibleClient
+from data_designer.engine.models.clients.errors import ProviderError
 from data_designer.engine.models.clients.retry import create_retry_transport
 from data_designer.engine.models.clients.types import ChatCompletionRequest
 from tests.engine.models.clients.conftest import mock_httpx_response
@@ -398,6 +399,29 @@ def test_event_hooks_added_after_construction_are_not_installed(
     client.completion(_make_chat_request(model_name))
 
     assert seen == ["registered"]
+
+
+@pytest.mark.parametrize(("client_factory", "model_name", "response_json"), _SYNC_LAZY_INIT_CASES)
+@pytest.mark.parametrize("hook_name", ["request", "response"])
+def test_sync_hook_returning_awaitable_fails_instead_of_being_skipped(
+    client_factory: Callable[..., Any],
+    model_name: str,
+    response_json: dict[str, Any],
+    hook_name: str,
+) -> None:
+    transport = create_retry_transport(
+        None,
+        strip_rate_limit_codes=False,
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=response_json)),
+    )
+    client = client_factory(
+        concurrency_mode=ClientConcurrencyMode.SYNC,
+        event_hooks={hook_name: [lambda r: _async_hook(r)]},
+        transport=transport,
+    )
+
+    with pytest.raises(ProviderError, match="awaitable"):
+        client.completion(_make_chat_request(model_name))
 
 
 # ---------------------------------------------------------------------------

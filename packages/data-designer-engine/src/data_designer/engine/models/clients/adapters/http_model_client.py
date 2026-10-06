@@ -279,9 +279,15 @@ def _wrap_event_hook(hook: Callable[..., Any], is_async: bool) -> Callable[..., 
 
     def sync_wrapper(obj: Any) -> None:
         try:
-            hook(obj)
+            result = hook(obj)
         except Exception as exc:
             raise EventHookError(f"event hook {hook!r} raised {type(exc).__name__}: {exc}") from exc
+        # A plain function returning a coroutine (e.g. ``lambda r: async_fn(r)``) passes construction-time
+        # validation but would never run on a sync client; fail loudly instead of dropping it.
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise EventHookError(f"sync event hook {hook!r} returned an awaitable; use a sync callable")
 
     return sync_wrapper
 
