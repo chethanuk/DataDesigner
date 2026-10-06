@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import pickle
+import typing
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
@@ -139,6 +143,39 @@ def test_run_config_rejects_invalid_max_concurrent_row_groups() -> None:
         RunConfig(max_concurrent_row_groups=0)
 
 
+def test_run_config_defaults_to_fixed_row_group_admission() -> None:
+    run_config = RunConfig()
+
+    assert run_config.adaptive_row_group_admission is False
+    assert run_config.adaptive_row_group_initial_target == 1
+
+
+@pytest.mark.parametrize(
+    ("max_concurrent_row_groups", "initial_target"),
+    [(3, 1), (3, 2), (2, 10)],
+    ids=["min-target", "below-cap", "above-cap-left-to-scheduler"],
+)
+def test_run_config_accepts_adaptive_row_group_admission(max_concurrent_row_groups: int, initial_target: int) -> None:
+    run_config = RunConfig(
+        max_concurrent_row_groups=max_concurrent_row_groups,
+        adaptive_row_group_admission=True,
+        adaptive_row_group_initial_target=initial_target,
+    )
+
+    assert run_config.adaptive_row_group_admission is True
+    assert run_config.adaptive_row_group_initial_target == initial_target
+
+
+@pytest.mark.parametrize("initial_target", [0, -1])
+def test_run_config_rejects_invalid_adaptive_row_group_initial_target(initial_target: int) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        RunConfig(adaptive_row_group_initial_target=initial_target)
+
+    [error] = exc_info.value.errors()
+    assert error["loc"] == ("adaptive_row_group_initial_target",)
+    assert error["type"] == "greater_than_equal"
+
+
 def test_run_config_defaults_max_in_flight_tasks_to_1024() -> None:
     assert RunConfig().max_in_flight_tasks == 1024
 
@@ -152,6 +189,21 @@ def test_run_config_accepts_custom_max_in_flight_tasks() -> None:
 def test_run_config_rejects_invalid_max_in_flight_tasks() -> None:
     with pytest.raises(ValidationError, match="max_in_flight_tasks"):
         RunConfig(max_in_flight_tasks=0)
+
+
+@pytest.mark.parametrize(
+    ("disable", "rate", "expected_effective"),
+    [(False, 0.2, 0.2), (True, 0.2, 1.0), (True, 0.0, 1.0), (False, 1.0, 1.0)],
+    ids=["enabled-keeps-rate", "disabled-overrides-rate", "disabled-overrides-zero-rate", "enabled-max-rate"],
+)
+def test_run_config_keeps_rate_and_derives_effective_rate(
+    disable: bool, rate: float, expected_effective: float
+) -> None:
+    run_config = RunConfig(disable_early_shutdown=disable, shutdown_error_rate=rate)
+
+    assert run_config.shutdown_error_rate == rate
+    assert run_config.effective_shutdown_error_rate == expected_effective
+    assert RunConfig.model_validate(run_config.model_dump()) == run_config
 
 
 def test_run_config_throttle_shim_rejects_unknown_legacy_fields() -> None:
@@ -257,6 +309,31 @@ def test_deprecated_throttle_config_is_exported_from_config_package() -> None:
     namespace: dict[str, object] = {}
     exec("from data_designer.config import ThrottleConfig", namespace)
     assert namespace["ThrottleConfig"] is ThrottleConfig
+
+
+@pytest.mark.parametrize(
+    "config",
+    [ThrottleConfig(reduce_factor=0.5), RequestAdmissionTuningConfig(multiplicative_decrease_factor=0.5)],
+    ids=["throttle", "request-admission"],
+)
+def test_moved_config_unpickles_from_pre_move_module_path(
+    config: ThrottleConfig | RequestAdmissionTuningConfig,
+) -> None:
+    # Pickles written before these classes moved out of run_config record
+    # data_designer.config.run_config; patching __module__ reproduces those bytes. Unpickling
+    # resolves them through the module-level re-imports in run_config.
+    new_module = type(config).__module__
+    with patch.object(type(config), "__module__", "data_designer.config.run_config"):
+        legacy_payload = pickle.dumps(config)
+
+    assert new_module.encode() not in legacy_payload
+    assert pickle.loads(legacy_payload) == config
+
+
+def test_deprecated_throttle_config_return_annotation_resolves_at_runtime() -> None:
+    hints = typing.get_type_hints(dd.ThrottleConfig.to_request_admission_tuning)
+
+    assert hints["return"] is dd.RequestAdmissionTuningConfig
 
 
 def test_throttle_config_accepts_rampup_seconds() -> None:
