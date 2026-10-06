@@ -9,6 +9,7 @@ import re
 import socket
 import subprocess
 import sys
+import typing
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +17,7 @@ from threading import Barrier, Event
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.error import URLError
 from urllib.request import urlopen
+from wsgiref.simple_server import WSGIServer
 
 import pytest
 
@@ -1002,8 +1004,6 @@ def test_concurrent_data_designer_creates_share_one_exporter(
 
 def test_stdlib_server_annotation_resolves_at_runtime() -> None:
     # STYLEGUIDE: stdlib imports stay at runtime, so get_type_hints can resolve WSGIServer.
-    import typing
-
     hints = typing.get_type_hints(opentelemetry._stop_server)
 
-    assert "server" in hints
+    assert hints["server"] == WSGIServer | None
