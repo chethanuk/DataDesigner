@@ -135,6 +135,9 @@ class ModelRegistry:
                 input_tokens=model.usage_stats.token_usage.input_tokens,
                 output_tokens=model.usage_stats.token_usage.output_tokens,
                 reasoning_tokens=model.usage_stats.token_usage.reasoning_tokens,
+                reasoning_tokens_estimated=(
+                    model.usage_stats.token_usage.reasoning_token_count_source == TokenCountSource.ESTIMATED.value
+                ),
                 successful_requests=model.usage_stats.request_usage.successful_requests,
                 failed_requests=model.usage_stats.request_usage.failed_requests,
             )

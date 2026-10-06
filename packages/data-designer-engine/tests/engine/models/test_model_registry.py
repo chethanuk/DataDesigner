@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -767,9 +768,54 @@ def test_log_model_usage_models_without_usage_excluded(stub_model_registry: Mode
                 )
             ],
         ),
+        (
+            "reasoning_source_is_preserved",
+            {
+                "alpha": (
+                    TokenUsageStats(
+                        input_tokens=1, output_tokens=2, reasoning_tokens=5, reasoning_token_count_source="estimated"
+                    ),
+                    RequestUsageStats(successful_requests=1),
+                ),
+                "zeta": (
+                    TokenUsageStats(
+                        input_tokens=1, output_tokens=2, reasoning_tokens=7, reasoning_token_count_source="provider"
+                    ),
+                    RequestUsageStats(successful_requests=1),
+                ),
+            },
+            [
+                ModelUsageSummary(
+                    model_alias="alpha",
+                    model_name="shared-model",
+                    input_tokens=1,
+                    output_tokens=2,
+                    reasoning_tokens=5,
+                    reasoning_tokens_estimated=True,
+                    successful_requests=1,
+                    failed_requests=0,
+                ),
+                ModelUsageSummary(
+                    model_alias="zeta",
+                    model_name="shared-model",
+                    input_tokens=1,
+                    output_tokens=2,
+                    reasoning_tokens=7,
+                    reasoning_tokens_estimated=False,
+                    successful_requests=1,
+                    failed_requests=0,
+                ),
+            ],
+        ),
     ],
 )
-def test_get_model_usage_summaries(stub_secrets_resolver, stub_model_provider_registry, case, used, expected):
+def test_get_model_usage_summaries(
+    stub_secrets_resolver: Any,
+    stub_model_provider_registry: Any,
+    case: str,
+    used: dict[str, tuple[TokenUsageStats, RequestUsageStats]],
+    expected: list[ModelUsageSummary],
+) -> None:
     configs = [
         ModelConfig(
             alias=alias,
