@@ -102,6 +102,12 @@ class ToolConfig(ConfigBase):
             generation. A turn is one iteration where the LLM requests tool calls. With parallel
             tool calling, a single turn may execute multiple tools simultaneously. Defaults to 5.
         timeout_sec (float | None): Timeout in seconds for MCP tool calls. Defaults to None (no timeout).
+        unknown_tool_fallback (bool): If True, a tool call naming a tool that no configured provider offers
+            is answered with a tool message instead of failing the generation. This applies even when the name
+            is outside allow_tools or its arguments are malformed; a tool that exists but is outside allow_tools
+            still fails the generation. Defaults to False.
+        unknown_tool_message (str | None): Content of that tool message. Used only when unknown_tool_fallback
+            is True. Defaults to None (built-in message).
 
     Examples:
         >>> ToolConfig(
@@ -118,3 +124,5 @@ class ToolConfig(ConfigBase):
     allow_tools: list[str] | None = None
     max_tool_call_turns: int = Field(default=5, ge=1)
     timeout_sec: float | None = Field(default=None, gt=0)
+    unknown_tool_fallback: bool = False
+    unknown_tool_message: str | None = Field(default=None, min_length=1)
