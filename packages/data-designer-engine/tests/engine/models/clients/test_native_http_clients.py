@@ -4,17 +4,21 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import subprocess
 import sys
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from data_designer.engine.models.clients.adapters.anthropic import AnthropicClient
 from data_designer.engine.models.clients.adapters.http_model_client import ClientConcurrencyMode
 from data_designer.engine.models.clients.adapters.openai_compatible import OpenAICompatibleClient
+from data_designer.engine.models.clients.errors import ProviderError
+from data_designer.engine.models.clients.retry import create_retry_transport
 from data_designer.engine.models.clients.types import ChatCompletionRequest
 from tests.engine.models.clients.conftest import mock_httpx_response
 
@@ -285,6 +289,139 @@ def test_sync_mode_rejects_async_client_injection(client_factory: Callable[..., 
 def test_async_mode_rejects_sync_client_injection(client_factory: Callable[..., Any], model_name: str) -> None:
     with pytest.raises(ValueError, match="sync_client must not be provided"):
         client_factory(concurrency_mode=ClientConcurrencyMode.ASYNC, sync_client=MagicMock())
+
+
+def _sync_hook(r: Any) -> None:
+    pass
+
+
+async def _async_hook(r: Any) -> None:
+    pass
+
+
+class _AsyncCallable:
+    async def __call__(self, r: Any) -> None:
+        pass
+
+
+_SYNC = ClientConcurrencyMode.SYNC
+_ASYNC = ClientConcurrencyMode.ASYNC
+_MUST_BE_SYNC = "must be sync callables"
+_MUST_BE_ASYNC = "must be async callables"
+_INJECTED_CLIENT = "injected sync_client/async_client"
+_UNKNOWN_HOOK_KEY = "event_hooks keys must be"
+_NOT_A_LIST = "must be a list of callables"
+_NOT_CALLABLE = "must be callable"
+
+_EVENT_HOOKS_VALIDATION_CASES = [
+    pytest.param(_SYNC, {"request": [_async_hook]}, None, _MUST_BE_SYNC, id="sync-rejects-async-def"),
+    pytest.param(_SYNC, {"response": [_AsyncCallable()]}, None, _MUST_BE_SYNC, id="sync-rejects-async-callable-object"),
+    pytest.param(_ASYNC, {"request": [_sync_hook]}, None, _MUST_BE_ASYNC, id="async-rejects-sync-def"),
+    pytest.param(
+        _ASYNC,
+        {"request": [lambda r: _async_hook(r)]},
+        None,
+        _MUST_BE_ASYNC,
+        id="async-rejects-sync-lambda-returning-awaitable",
+    ),
+    pytest.param(_SYNC, {"responses": [_sync_hook]}, None, _UNKNOWN_HOOK_KEY, id="rejects-unknown-hook-key"),
+    pytest.param(_SYNC, {"request": [_sync_hook]}, "sync_client", _INJECTED_CLIENT, id="sync-rejects-injected-client"),
+    pytest.param(
+        _ASYNC, {"request": [_async_hook]}, "async_client", _INJECTED_CLIENT, id="async-rejects-injected-client"
+    ),
+    pytest.param(_SYNC, {"request": [None]}, None, _NOT_CALLABLE, id="sync-rejects-none-hook"),
+    pytest.param(_SYNC, {"response": [1]}, None, _NOT_CALLABLE, id="sync-rejects-non-callable-hook"),
+    pytest.param(_ASYNC, {"request": [None]}, None, _NOT_CALLABLE, id="async-rejects-none-hook"),
+    pytest.param(_SYNC, {"request": "abc"}, None, _NOT_A_LIST, id="rejects-string-value"),
+    pytest.param(_SYNC, {"request": _sync_hook}, None, _NOT_A_LIST, id="rejects-bare-callable-value"),
+    pytest.param(_SYNC, {"request": [_sync_hook], "response": [_sync_hook]}, None, None, id="sync-accepts-sync-def"),
+    pytest.param(_SYNC, {"request": (_sync_hook,)}, None, None, id="sync-accepts-tuple"),
+    pytest.param(_ASYNC, {"request": [_async_hook]}, None, None, id="async-accepts-async-def"),
+    pytest.param(_ASYNC, {"response": [_AsyncCallable()]}, None, None, id="async-accepts-async-callable-object"),
+    pytest.param(
+        _ASYNC, {"request": [functools.partial(_async_hook)]}, None, None, id="async-accepts-partial-of-async-def"
+    ),
+    pytest.param(
+        _ASYNC,
+        {"request": [functools.partial(_AsyncCallable())]},
+        None,
+        None,
+        id="async-accepts-partial-of-async-callable-object",
+    ),
+    pytest.param(_SYNC, {"request": [_sync_hook]}, "transport", None, id="sync-accepts-injected-transport"),
+    pytest.param(_SYNC, {}, "sync_client", None, id="accepts-empty-mapping"),
+    pytest.param(_ASYNC, None, None, None, id="accepts-none"),
+]
+
+
+@pytest.mark.parametrize(("mode", "hooks", "inject", "expected_error"), _EVENT_HOOKS_VALIDATION_CASES)
+@pytest.mark.parametrize(("client_factory", "model_name"), _CLIENT_FACTORY_CASES)
+def test_event_hooks_validated_at_construction(
+    client_factory: Callable[..., Any],
+    model_name: str,
+    mode: ClientConcurrencyMode,
+    hooks: dict[str, list[Callable[..., Any]]] | None,
+    inject: str | None,
+    expected_error: str | None,
+) -> None:
+    kwargs: dict[str, Any] = {}
+    if inject in ("sync_client", "async_client"):
+        kwargs[inject] = MagicMock()
+    elif inject == "transport":
+        kwargs["transport"] = create_retry_transport(
+            None, strip_rate_limit_codes=False, transport=httpx.MockTransport(lambda r: httpx.Response(200))
+        )
+
+    if expected_error is None:
+        client_factory(concurrency_mode=mode, event_hooks=hooks, **kwargs)
+    else:
+        with pytest.raises(ValueError, match=expected_error):
+            client_factory(concurrency_mode=mode, event_hooks=hooks, **kwargs)
+
+
+@pytest.mark.parametrize(("client_factory", "model_name", "response_json"), _SYNC_LAZY_INIT_CASES)
+def test_event_hooks_added_after_construction_are_not_installed(
+    client_factory: Callable[..., Any],
+    model_name: str,
+    response_json: dict[str, Any],
+) -> None:
+    seen: list[str] = []
+    hooks: dict[str, list[Callable[..., Any]]] = {"request": [lambda r: seen.append("registered")]}
+    transport = create_retry_transport(
+        None,
+        strip_rate_limit_codes=False,
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=response_json)),
+    )
+    client = client_factory(concurrency_mode=ClientConcurrencyMode.SYNC, event_hooks=hooks, transport=transport)
+
+    hooks["request"].append(lambda r: seen.append("late"))
+    hooks["response"] = [lambda r: seen.append("late")]
+    client.completion(_make_chat_request(model_name))
+
+    assert seen == ["registered"]
+
+
+@pytest.mark.parametrize(("client_factory", "model_name", "response_json"), _SYNC_LAZY_INIT_CASES)
+@pytest.mark.parametrize("hook_name", ["request", "response"])
+def test_sync_hook_returning_awaitable_fails_instead_of_being_skipped(
+    client_factory: Callable[..., Any],
+    model_name: str,
+    response_json: dict[str, Any],
+    hook_name: str,
+) -> None:
+    transport = create_retry_transport(
+        None,
+        strip_rate_limit_codes=False,
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=response_json)),
+    )
+    client = client_factory(
+        concurrency_mode=ClientConcurrencyMode.SYNC,
+        event_hooks={hook_name: [lambda r: _async_hook(r)]},
+        transport=transport,
+    )
+
+    with pytest.raises(ProviderError, match="awaitable"):
+        client.completion(_make_chat_request(model_name))
 
 
 # ---------------------------------------------------------------------------
