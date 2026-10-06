@@ -10,6 +10,7 @@ Data Designer docs are Fern-first:
 - Treat `fern/notebook_source/*.py` as the notebook source of truth.
 - Keep generated Fern notebook artifacts gitignored.
 - Keep the legacy MkDocs `gh-pages` archive frozen for releases `0.5.7` and older.
+- Release tags cut before the `docs/` -> `fern/` move cannot build notebooks with this workflow; rebuild them from a pre-move ref.
 
 Every docs source and support file lives in this folder:
 
