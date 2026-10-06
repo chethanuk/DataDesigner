@@ -13,6 +13,7 @@ This directory is the maintainer source of truth while the epic is active. Issue
 - [Module ownership](module-ownership.md): final repository/module homes, import rules, audience boundaries, tests, and benchmark ownership.
 - [Capacity model](capacity-model.md): layered capacity vocabulary and ownership.
 - [Task admission](task-admission.md): scheduler-owned ready selection, task leases, policy hooks, bounded borrowing, and resource-vector direction.
+- [Resource-vector admission](resource-vector-admission.md): provider-aware admission design for #651, decisions, open questions, and evidence-gated follow-ups.
 - [Request admission](request-admission.md): model-call admission, AIMD controller shape, dynamic request semantics, and replacement of pre-epic request-control names.
 - [Observability](observability.md): scheduler events, request events, runtime correlation, snapshots, and cardinality rules.
 - [Benchmark plan](benchmark-plan.md): scenarios, metrics, A/B baselines, and required artifacts.

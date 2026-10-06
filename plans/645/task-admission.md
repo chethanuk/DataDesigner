@@ -102,7 +102,7 @@ V1 includes:
 
 V1 request waits remain inside admitted task execution and the task lease is retained until worker completion. That preserves the lease boundary and makes request waits visible, but it does not by itself solve cross-provider utilization when tasks for a cooled-down provider occupy all scheduler task slots. Issue #651 must address provider/resource-aware task admission or an explicit yield/reacquire design before the epic claims cross-provider scheduling optimization as complete.
 
-The current branch includes a narrow request-pressure advisory inside scheduler selection: when request-admission pressure is visible for one candidate and another eligible peer is not pressured, the scheduler may skip the pressured candidate for that selection pass. This consumes request-pressure snapshots as read-only input and does not mutate request-admission state or duplicate provider/model/domain AIMD. Treat broader provider/resource-aware scheduling as #651 scope.
+The request-pressure advisory (merged in #661) is a narrow policy inside scheduler selection: when request-admission pressure is visible for one candidate and another eligible peer is not pressured, the scheduler may skip the pressured candidate for that selection pass. This consumes request-pressure snapshots as read-only input and does not mutate request-admission state or duplicate provider/model/domain AIMD. Broader provider/resource-aware scheduling is #651 scope; see [Resource-vector admission](resource-vector-admission.md).
 
 V1 excludes:
 
@@ -180,7 +180,7 @@ Policy constraints:
 
 ## Resource-Vector Direction
 
-Future policy work may use `SchedulerResourceKey` and `SchedulerResourceRequest` for multi-resource admission. Candidate resources include submission, local resources, GPU slots if reliable metadata exists, or scheduler-owned task-stage resources derived from `SchedulingMetadata`. Provider/model/domain request resources remain owned by request admission.
+Future policy work may use `SchedulerResourceKey` and `SchedulerResourceRequest` for multi-resource admission. Candidate resources include submission, local resources, GPU slots if reliable metadata exists, or scheduler-owned task-stage resources derived from `SchedulingMetadata`. Provider/model/domain request resources remain owned by request admission. The scheduler-side `request:{provider}/{model}` task-stage cap (#730) shadows, and never replaces, request-admission limits. Design and open questions: [Resource-vector admission](resource-vector-admission.md).
 
 Resource-vector policy must:
 
