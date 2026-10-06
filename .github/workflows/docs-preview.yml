@@ -5,10 +5,6 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - "fern/**"
-      - "docs/assets/recipes/**"
-      - "docs/notebook_source/**"
-      - "docs/colab_notebooks/**"
-      - "docs/scripts/**"
       - "packages/data-designer-config/src/data_designer/config/**"
       - "packages/data-designer/src/data_designer/interface/**"
       - "packages/data-designer-engine/src/data_designer/engine/column_generators/generators/base.py"
@@ -47,7 +43,8 @@ jobs:
         run: uv python install 3.11
 
       - name: Install docs dependencies
-        run: uv sync --all-packages --group docs --group notebooks
+        # Fern preview converts notebook sources with jupytext; it does not execute notebooks.
+        run: uv sync --all-packages --group docs
 
       - name: Verify published Fern archive exists
         run: |

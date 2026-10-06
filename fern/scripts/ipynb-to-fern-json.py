@@ -19,7 +19,7 @@ imports — Fern's bundler doesn't follow JSON imports cleanly).
 
 Usage:
   python ipynb-to-fern-json.py input.ipynb -o output.json
-  python ipynb-to-fern-json.py docs/colab_notebooks/1-the-basics.ipynb -o fern/components/notebooks/1-the-basics.json
+  python ipynb-to-fern-json.py fern/colab_notebooks/1-the-basics.ipynb -o fern/components/notebooks/1-the-basics.json
 
 Run after: make convert-execute-notebooks && make generate-colab-notebooks
   (executed notebooks preserve outputs; generate-colab injects the colab setup cell.)

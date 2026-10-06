@@ -5,7 +5,7 @@
 This script processes jupytext percent-format Python files and:
 1. Injects an "Open in Colab" badge as the first cell
 2. Injects Colab-specific setup cells (pip install, API key from secrets)
-3. Saves the result as .ipynb files in docs/colab_notebooks
+3. Saves the result as .ipynb files in fern/colab_notebooks
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from nbformat.v4 import new_code_cell, new_markdown_cell
 
 COLAB_BADGE_TEMPLATE = (
     '<a href="https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner'
-    '/blob/main/docs/colab_notebooks/{filename}" target="_parent">'
+    '/blob/main/fern/colab_notebooks/{filename}" target="_parent">'
     '<img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>'
 )
 
@@ -30,7 +30,7 @@ Run the cells below to install the dependencies and set up the API key. If you d
 """
 
 ADDITIONAL_DEPENDENCIES = {
-    "4-providing-images-as-context.py": '"pillow>=12.0.0,<13" "datasets>=4.0.0,<5"',
+    "4-providing-images-as-context.py": '"pillow>=12.0.0,<13" "datasets>=5.0.1,<6"',
 }
 
 COLAB_INSTALL_CELL = """\
@@ -173,14 +173,14 @@ def main() -> None:
     parser.add_argument(
         "--source-dir",
         type=Path,
-        default=Path("docs/notebook_source"),
-        help="Directory containing notebook source files (default: docs/notebook_source)",
+        default=Path("fern/notebook_source"),
+        help="Directory containing notebook source files (default: fern/notebook_source)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("docs/colab_notebooks"),
-        help="Directory to save Colab notebooks (default: docs/colab_notebooks)",
+        default=Path("fern/colab_notebooks"),
+        help="Directory to save Colab notebooks (default: fern/colab_notebooks)",
     )
     parser.add_argument(
         "--files",

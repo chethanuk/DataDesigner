@@ -4,11 +4,11 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'docs/notebook_source/*.py'
+      - 'fern/notebook_source/*.py'
   pull_request:
     branches: [ main ]
     paths:
-      - 'docs/notebook_source/*.py'
+      - 'fern/notebook_source/*.py'
   workflow_dispatch:
 
 permissions: {}
@@ -46,11 +46,11 @@ jobs:
 
           while IFS= read -r -d '' source_path; do
             printf '%s\0' "${source_path##*/}"
-          done < <(git diff --no-renames --name-only -z --diff-filter=ACDMT "$BASE_SHA" "$GITHUB_SHA" -- 'docs/notebook_source/*.py') > "$RUNNER_TEMP/changed-notebook-sources"
+          done < <(git diff --no-renames --name-only -z --diff-filter=ACDMT "$BASE_SHA" "$GITHUB_SHA" -- 'fern/notebook_source/*.py') > "$RUNNER_TEMP/changed-notebook-sources"
 
           while IFS= read -r -d '' source_path; do
             printf '%s\0' "${source_path##*/}"
-          done < <(git diff --no-renames --name-only -z --diff-filter=D "$BASE_SHA" "$GITHUB_SHA" -- 'docs/notebook_source/*.py') > "$RUNNER_TEMP/deleted-notebook-sources"
+          done < <(git diff --no-renames --name-only -z --diff-filter=D "$BASE_SHA" "$GITHUB_SHA" -- 'fern/notebook_source/*.py') > "$RUNNER_TEMP/deleted-notebook-sources"
 
       - name: Generate Colab notebooks
         env:
@@ -62,7 +62,7 @@ jobs:
           fi
 
           while IFS= read -r -d '' file; do
-            rm -f "docs/colab_notebooks/${file%.py}.ipynb"
+            rm -f "fern/colab_notebooks/${file%.py}.ipynb"
           done < "$RUNNER_TEMP/deleted-notebook-sources"
 
           make generate-colab-notebooks FILES_FILE="$RUNNER_TEMP/changed-notebook-sources"
@@ -70,8 +70,8 @@ jobs:
       - name: Check for differences
         run: |
           # Jupytext assigns random cell IDs, so ignore ID-only changes.
-          git add -N docs/colab_notebooks/
-          MEANINGFUL_DIFF=$(git diff docs/colab_notebooks/ | grep -E '^[+-]' | grep -v '^---' | grep -v '^+++' | grep -vE '^[+-]\s*"id": "[0-9a-fA-F]+",?$' || true)
+          git add -N fern/colab_notebooks/
+          MEANINGFUL_DIFF=$(git diff fern/colab_notebooks/ | grep -E '^[+-]' | grep -v '^---' | grep -v '^+++' | grep -vE '^[+-]\s*"id": "[0-9a-fA-F]+",?$' || true)
 
           if [ -n "$MEANINGFUL_DIFF" ]; then
             echo "❌ Colab notebooks are out of sync with source files"

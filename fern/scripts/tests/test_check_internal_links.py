@@ -197,7 +197,7 @@ def test_validate_links_ignores_code_blocks_and_external_urls(docs_root: Path) -
 
 
 def test_notebook_sources_add_generated_heading_anchors(docs_root: Path, tmp_path: Path) -> None:
-    notebook_source = tmp_path / "docs/notebook_source/the-basics.py"
+    notebook_source = tmp_path / "fern/notebook_source/the-basics.py"
     notebook_source.parent.mkdir(parents=True)
     notebook_source.write_text("# %% [markdown]\n# ## Generated heading\n", encoding="utf-8")
     columns = docs_root / "versions/latest/pages/columns.mdx"
