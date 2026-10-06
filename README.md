@@ -6,6 +6,8 @@
 
 **Generate high-quality synthetic datasets from scratch or using your own seed data.**
 
+📄 **[Read the technical report](https://arxiv.org/abs/2609.17699)** — Architecture, programming model, and case studies for multimodal synthetic data generation.
+
 ---
 
 ## Welcome!
@@ -139,7 +141,7 @@ After installation, invoke the `data-designer` skill or describe the dataset you
 
 This repository supports agent-assisted development — see [CONTRIBUTING.md](CONTRIBUTING.md) for the recommended workflow.
 
-- **[Contributing Guide](CONTRIBUTING.md)** – How to contribute, including agent-assisted workflows
+- **[Contributing Guide](CONTRIBUTING.md)** – How to contribute, including issue triage before external PRs and agent-assisted workflows
 - **[GitHub Issues](https://github.com/NVIDIA-NeMo/DataDesigner/issues)** – Report bugs or make a feature request
 
 ---
@@ -168,15 +170,17 @@ Apache License 2.0 – see [LICENSE](LICENSE) for details.
 
 ## Citation
 
-If you use NeMo Data Designer in your research, please cite it using the following BibTeX entry:
+If you use NeMo Data Designer in your research, please cite our [technical report](https://arxiv.org/abs/2609.17699):
 
 ```bibtex
-@misc{nemo-data-designer,
-  author = {The NeMo Data Designer Team, NVIDIA},
-  title = {NeMo Data Designer: A framework for generating synthetic data from scratch or based on your own seed data},
-  howpublished = {\url{https://github.com/NVIDIA-NeMo/DataDesigner}},
-  year = {2025},
-  note = {GitHub Repository},
+@misc{greco2026nemodatadesignerextensible,
+  title = {NeMo Data Designer: An Extensible Framework for Multimodal Synthetic Data Generation},
+  author = {Johnny Greco and Nabin Mulepati and Andre Manoel and Eric Tramel and Kirit Thadaka and Mike Knepper and Dhruv Nathawani and Dane Corneil and Yev Meyer and Alex Watson and Maarten Van Segbroeck},
+  year = {2026},
+  eprint = {2609.17699},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.AI},
+  url = {https://arxiv.org/abs/2609.17699},
 }
 ```
 
