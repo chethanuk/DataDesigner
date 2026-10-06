@@ -790,3 +790,30 @@ def test_log_model_usage_models_without_usage_excluded(stub_model_registry: Mode
         assert calls[0] == "📊 Model usage summary:"
         assert calls[1] == f"{LOG_INDENT}model: stub-model-reasoning"
         assert "stub-model-text" not in str(calls)
+
+
+@pytest.mark.parametrize(
+    ("image_aliases", "text_aliases", "expected_shapes"),
+    [
+        pytest.param({"stub-text"}, set(), [True], id="image-only"),
+        pytest.param({"stub-text"}, {"stub-text"}, [True, False], id="mixed-use-probes-both"),
+        pytest.param(set(), {"stub-text"}, [False], id="text-only"),
+    ],
+)
+@patch.object(ModelFacade, "acompletion", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_arun_health_check_probes_both_shapes_for_mixed_use_alias(
+    mock_acompletion: AsyncMock,
+    image_aliases: set[str],
+    text_aliases: set[str],
+    expected_shapes: list[bool],
+    stub_model_registry: ModelRegistry,
+) -> None:
+    mock_acompletion.return_value = make_stub_completion_response(content="Hello!")
+
+    await stub_model_registry.arun_health_check(
+        ["stub-text"], image_context_aliases=image_aliases, text_context_aliases=text_aliases
+    )
+
+    sent = [_probe_user_content(call.args[0]) != "Hello!" for call in mock_acompletion.await_args_list]
+    assert sent == expected_shapes

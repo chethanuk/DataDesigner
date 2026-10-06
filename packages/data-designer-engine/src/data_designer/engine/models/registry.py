@@ -296,7 +296,13 @@ class ModelRegistry:
                 logger.error(f"{LOG_INDENT}❌ Failed!")
                 raise
 
-    async def arun_health_check(self, model_aliases: list[str], *, image_context_aliases: Collection[str] = ()) -> None:
+    async def arun_health_check(
+        self,
+        model_aliases: list[str],
+        *,
+        image_context_aliases: Collection[str] = (),
+        text_context_aliases: Collection[str] = (),
+    ) -> None:
         """Async version of ``run_health_check`` for async-mode registries."""
         logger.info("🩺 Running health checks for models...")
         for model_alias in model_aliases:
@@ -320,18 +326,22 @@ class ModelRegistry:
                     )
                     _validate_health_check_embedding_response(vectors, model_alias=model_alias)
                 elif model.model_generation_type == GenerationType.CHAT_COMPLETION:
-                    await model.agenerate(
-                        prompt="Hello!",
-                        multi_modal_context=[_HEALTH_CHECK_IMAGE_BLOCK]
-                        if model_alias in image_context_aliases
-                        else None,
-                        parser=_parse_health_check_chat_response,
-                        system_prompt="You are a helpful assistant.",
-                        max_correction_steps=0,
-                        max_conversation_restarts=0,
-                        skip_usage_tracking=True,
-                        purpose="running health checks",
-                    )
+                    # An alias shared by image and text-only columns must pass both request shapes.
+                    has_image = model_alias in image_context_aliases
+                    shapes = [[_HEALTH_CHECK_IMAGE_BLOCK]] if has_image else [None]
+                    if has_image and model_alias in text_context_aliases:
+                        shapes.append(None)
+                    for multi_modal_context in shapes:
+                        await model.agenerate(
+                            prompt="Hello!",
+                            multi_modal_context=multi_modal_context,
+                            parser=_parse_health_check_chat_response,
+                            system_prompt="You are a helpful assistant.",
+                            max_correction_steps=0,
+                            max_conversation_restarts=0,
+                            skip_usage_tracking=True,
+                            purpose="running health checks",
+                        )
                 elif model.model_generation_type == GenerationType.IMAGE:
                     await model.agenerate_image(
                         prompt="Generate a simple illustration of a thumbs up sign.",

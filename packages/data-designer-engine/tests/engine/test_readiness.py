@@ -320,7 +320,7 @@ def test_run_readiness_check_passes_skip_flagged_aliases_to_registry(
     run_readiness_check(columns, stub_resource_provider)
 
     stub_resource_provider.model_registry.arun_health_check.assert_called_once_with(
-        ["stub-text"], image_context_aliases=set()
+        ["stub-text"], image_context_aliases=set(), text_context_aliases={"stub-text"}
     )
 
 
@@ -431,6 +431,46 @@ def test_run_readiness_check_flags_aliases_whose_columns_take_image_context(
     assert set(kwargs["image_context_aliases"]) == expected_image_aliases
 
 
+@pytest.mark.parametrize(
+    ("columns", "expected_text_aliases"),
+    [
+        pytest.param(
+            [LLMTextColumnConfig(name="c", prompt="x", model_alias="vlm", multi_modal_context=_IMAGE)],
+            set(),
+            id="image-only-alias",
+        ),
+        pytest.param(
+            [
+                LLMTextColumnConfig(name="a", prompt="x", model_alias="vlm", multi_modal_context=_IMAGE),
+                LLMTextColumnConfig(name="b", prompt="x", model_alias="vlm"),
+            ],
+            {"vlm"},
+            id="alias-shared-with-text-only-column",
+        ),
+        pytest.param(
+            [
+                _PairwiseVisionJudgeColumnConfig(
+                    name="c", model_alias="vlm", judge_model_alias="judge", multi_modal_context=_IMAGE
+                )
+            ],
+            {"judge"},
+            id="secondary-alias-text-only",
+        ),
+    ],
+)
+def test_run_readiness_check_reports_aliases_also_used_without_image(
+    columns, expected_text_aliases, stub_resource_provider
+) -> None:
+    stub_resource_provider.model_registry.arun_health_check = Mock()
+    stub_resource_provider.mcp_registry = None
+
+    with patch("data_designer.engine.readiness.column_type_is_model_generated", return_value=False):
+        run_readiness_check(columns, stub_resource_provider)
+
+    _, kwargs = stub_resource_provider.model_registry.arun_health_check.call_args
+    assert set(kwargs["text_context_aliases"]) == expected_text_aliases
+
+
 # ---------------------------------------------------------------------------
 # Async dispatch
 # ---------------------------------------------------------------------------
@@ -455,7 +495,7 @@ def test_run_readiness_check_dispatches_to_async_registry(
 
     # The async coroutine was created from arun_health_check and submitted to the loop.
     stub_resource_provider.model_registry.arun_health_check.assert_called_once_with(
-        ["stub-text"], image_context_aliases=set()
+        ["stub-text"], image_context_aliases=set(), text_context_aliases={"stub-text"}
     )
     mock_submit.assert_called_once()
     sentinel_future.result.assert_called_once_with(timeout=180)

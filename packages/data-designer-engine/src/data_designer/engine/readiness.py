@@ -87,12 +87,15 @@ def _run_model_health_check(
         model_aliases.update(config.get_model_aliases())
     # Generation sends a column's multi_modal_context to its model_alias only, so only that alias
     # gets an image in its probe; configs without a model_alias (plugins) keep the text probe.
-    image_context_aliases = {
-        config.model_alias
-        for config in column_configs
-        if getattr(config, "model_alias", None)
-        and any(isinstance(ctx, ImageContext) for ctx in getattr(config, "multi_modal_context", None) or ())
-    }
+    image_context_aliases: set[str] = set()
+    text_context_aliases: set[str] = set()
+    for config in column_configs:
+        aliases = set(config.get_model_aliases())
+        primary = getattr(config, "model_alias", None)
+        if primary and any(isinstance(ctx, ImageContext) for ctx in getattr(config, "multi_modal_context", None) or ()):
+            image_context_aliases.add(primary)
+            aliases.discard(primary)
+        text_context_aliases |= aliases
 
     if not model_aliases:
         return
@@ -100,7 +103,9 @@ def _run_model_health_check(
     loop = ensure_async_engine_loop()
     future = asyncio.run_coroutine_threadsafe(
         resource_provider.model_registry.arun_health_check(
-            list(model_aliases), image_context_aliases=image_context_aliases
+            list(model_aliases),
+            image_context_aliases=image_context_aliases,
+            text_context_aliases=text_context_aliases,
         ),
         loop,
     )
