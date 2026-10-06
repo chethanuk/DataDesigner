@@ -7,6 +7,10 @@ import { Authors } from "@/components/Authors";
 
 <Authors ids={["nmulepati"]} />
 
+<Note title="Historical post">
+This post describes the model client stack as it shipped in v0.5.4. `ThrottledModelClient` and `ThrottleManager` have since been replaced by `ModelRequestExecutor` and request admission. `RunConfig.throttle` and `ThrottleConfig` are deprecated in favor of `RunConfig.request_admission` with `RequestAdmissionTuningConfig`, and the throttle log lines quoted below are no longer written. The ceiling stabilization described below has also changed: after a 429, the limit now climbs back to `max_parallel_requests`, and `rate_limit_ceiling` is kept only for diagnostics. See [Async Scheduling](/concepts/async-scheduling) for the current design.
+</Note>
+
 
 Picture this: you're generating a million-record dataset. Thirty two concurrent requests per model, three models in the pipeline, two providers. Everything hums along for the first ten minutes — then one provider starts returning 429s, your retry logic kicks in, and suddenly you're in a feedback loop where retries *cause* more 429s. The run stalls. You restart with lower concurrency, waste throughput for hours, and wonder if there's a better way.
 
