@@ -1648,23 +1648,25 @@ def test_check_models_no_op_when_only_samplers(
 
 
 @pytest.mark.parametrize(
-    ("llm_columns", "skip_vlm", "expected_probes"),
+    ("llm_columns", "skip_vlm", "expected_probes", "also_text_probed"),
     [
-        pytest.param([("vlm", True)], False, {"vlm-model": True}, id="image-context"),
-        pytest.param([("txt", False)], False, {"txt-model": False}, id="text-only-unchanged"),
+        pytest.param([("vlm", True)], False, {"vlm-model": True}, set(), id="image-context"),
+        pytest.param([("txt", False)], False, {"txt-model": False}, set(), id="text-only-unchanged"),
         pytest.param(
             [("vlm", True), ("vlm", False), ("txt", False)],
             False,
             {"vlm-model": True, "txt-model": False},
+            {"vlm-model"},
             id="mixed-same-alias",
         ),
-        pytest.param([("vlm", True), ("txt", False)], True, {"txt-model": False}, id="skip-health-check"),
+        pytest.param([("vlm", True), ("txt", False)], True, {"txt-model": False}, set(), id="skip-health-check"),
     ],
 )
 def test_check_models_sends_placeholder_image_to_image_context_models(
     llm_columns,
     skip_vlm,
     expected_probes,
+    also_text_probed,
     httpx_mock,
     stub_check_models_data_designer,
 ):
@@ -1697,14 +1699,15 @@ def test_check_models_sends_placeholder_image_to_image_context_models(
             )
         )
 
-    probes: dict[str, Any] = {}
+    probes: dict[str, list[Any]] = {}
 
     def respond(request):
         body = json.loads(request.content)
         user_content = body["messages"][-1]["content"]
-        probes[body["model"]] = user_content
+        probes.setdefault(body["model"], []).append(user_content)
         has_image = isinstance(user_content, list) and any(part["type"] == "image_url" for part in user_content)
-        if body["model"] == "vlm-model" and not has_image:
+        # An alias shared with a text-only column is probed with both shapes, so it must accept text.
+        if body["model"] == "vlm-model" and not has_image and "vlm-model" not in also_text_probed:
             return lazy.httpx.Response(400, json={"error": {"message": "An image is required"}})
         return lazy.httpx.Response(
             200,
@@ -1722,11 +1725,16 @@ def test_check_models_sends_placeholder_image_to_image_context_models(
     stub_check_models_data_designer.check_models(config_builder)
 
     assert set(probes) == set(expected_probes)
+    text_shapes = ("Hello!", [{"type": "text", "text": "Hello!"}])
     for model, expect_image in expected_probes.items():
-        content = probes[model]
+        image_probes = [c for c in probes[model] if isinstance(c, list) and any(p["type"] == "image_url" for p in c)]
+        text_probes = [c for c in probes[model] if c not in image_probes]
+        assert bool(text_probes) == (not expect_image or model in also_text_probed), model
+        assert all(c in text_shapes for c in text_probes)
+        assert bool(image_probes) == expect_image, model
         if not expect_image:
-            assert content in ("Hello!", [{"type": "text", "text": "Hello!"}])
             continue
+        content = image_probes[0]
         image_part, text_part = content
         assert text_part == {"type": "text", "text": "Hello!"}
         assert image_part["type"] == "image_url"
