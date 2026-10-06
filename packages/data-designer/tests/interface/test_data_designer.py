@@ -6,7 +6,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
+import threading
+import time
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, PropertyMock, call, patch
@@ -493,7 +497,8 @@ def test_run_config_setting_persists(stub_artifact_path, stub_model_providers):
         )
     )
     assert data_designer.run_config.disable_early_shutdown is True
-    assert data_designer.run_config.shutdown_error_rate == 1.0  # normalized when disabled
+    assert data_designer.run_config.shutdown_error_rate == 0.8
+    assert data_designer.run_config.effective_shutdown_error_rate == 1.0
     assert data_designer.run_config.shutdown_error_window == 25
     assert data_designer.run_config.buffer_size == 500
     assert data_designer.run_config.max_in_flight_tasks == 1536
@@ -563,8 +568,8 @@ def test_resource_provider_uses_otel_sink_only_when_enabled(
         assert create_provider.call_args.kwargs["scheduler_event_sink"] is None
 
 
-def test_run_config_normalizes_error_rate_when_disabled(stub_artifact_path, stub_model_providers):
-    """Test that shutdown_error_rate is normalized to 1.0 when disabled."""
+def test_run_config_keeps_error_rate_when_disabled(stub_artifact_path, stub_model_providers):
+    """Test that shutdown_error_rate round-trips and only the effective rate is 1.0 when disabled."""
     data_designer = DataDesigner(artifact_path=stub_artifact_path, model_providers=stub_model_providers)
 
     # When enabled (default), shutdown_error_rate should use the configured value
@@ -576,14 +581,15 @@ def test_run_config_normalizes_error_rate_when_disabled(stub_artifact_path, stub
     )
     assert data_designer.run_config.shutdown_error_rate == 0.7
 
-    # When disabled, shutdown_error_rate should be normalized to 1.0
+    # When disabled, shutdown_error_rate keeps the configured value; the effective rate is 1.0
     data_designer.set_run_config(
         RunConfig(
             disable_early_shutdown=True,
             shutdown_error_rate=0.7,
         )
     )
-    assert data_designer.run_config.shutdown_error_rate == 1.0
+    assert data_designer.run_config.shutdown_error_rate == 0.7
+    assert data_designer.run_config.effective_shutdown_error_rate == 1.0
 
 
 def test_get_models_uses_sync_clients(stub_artifact_path, stub_model_providers):
@@ -759,6 +765,78 @@ def test_create_with_drop_true_preserves_columns_only_in_dropped_artifacts(
     assert "uuid" not in dropped_df.columns
     metadata = json.loads(results.artifact_storage.metadata_file_path.read_text())
     assert metadata["preserve_dropped_columns"] is True
+
+
+class _SlowChatCompletionHandler(BaseHTTPRequestHandler):
+    """OpenAI-compatible chat endpoint that answers every POST after 0.2 s."""
+
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("content-length", 0)))
+        time.sleep(0.2)
+        body = json.dumps(
+            {
+                "id": "chatcmpl-stub",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "stub-model",
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "hi"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+@patch("data_designer.engine.models.telemetry.TELEMETRY_ENABLED", False)
+@patch("data_designer.engine.models.facade.TELEMETRY_ENABLED", False)
+def test_create_logs_per_column_request_wait_and_idle_over_the_run(
+    stub_artifact_path: Path, stub_managed_assets_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """After create(), each model column gets its request wait and idle time, and the header names the denominator."""
+    caplog.set_level(logging.INFO)
+    with ThreadingHTTPServer(("127.0.0.1", 0), _SlowChatCompletionHandler) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            provider = ModelProvider(
+                name="local", endpoint=f"http://127.0.0.1:{server.server_address[1]}/v1", api_key="stub-key"
+            )
+            builder = DataDesignerConfigBuilder(
+                model_configs=[ModelConfig(alias="stub", model="stub-model", provider="local", skip_health_check=True)]
+            )
+            builder.add_column(
+                SamplerColumnConfig(
+                    name="topic", sampler_type=SamplerType.CATEGORY, params=CategorySamplerParams(values=["a", "b"])
+                )
+            )
+            builder.add_column(LLMTextColumnConfig(name="prompt", prompt="Say {{ topic }}", model_alias="stub"))
+            DataDesigner(
+                artifact_path=stub_artifact_path,
+                model_providers=[provider],
+                secret_resolver=PlaintextResolver(),
+                managed_assets_path=stub_managed_assets_path,
+                # Keep pytest's root capture handler attached so caplog sees the end-of-run log.
+                auto_configure_logging=False,
+            ).create(builder, num_records=4)
+        finally:
+            server.shutdown()
+
+    header = re.search(r"idle = run wall time ([\d.]+)s minus time with >=1 request in flight", caplog.text)
+    line = re.search(
+        r"column 'prompt': models=stub-model, request_wait_wall_time_s=([\d.]+), idle_time_s=([\d.]+), "
+        r"idle_pct_of_run=[\d.]+%, requests=4",
+        caplog.text,
+    )
+    assert header is not None
+    assert line is not None
+    run_s, wait, idle = float(header.group(1)), float(line.group(1)), float(line.group(2))
+    assert 0 < wait <= run_s
+    assert wait + idle == pytest.approx(run_s, abs=0.15)  # each value is rounded to 0.1 s
 
 
 def test_create_raises_error_when_builder_fails(
