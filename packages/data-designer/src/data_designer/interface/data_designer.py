@@ -626,11 +626,7 @@ class DataDesigner(DataDesignerInterface[DatasetCreationResults]):
         """Get the runtime configuration applied to dataset generation.
 
         Returns:
-            The active RunConfig instance. Note that ``RunConfig`` normalizes
-            some fields on construction (e.g., ``shutdown_error_rate`` becomes
-            ``1.0`` when ``disable_early_shutdown=True``), so the returned
-            object may not exactly equal the one originally passed to
-            ``set_run_config``.
+            The active RunConfig instance.
         """
         return self._run_config
 
@@ -743,16 +739,20 @@ class DataDesigner(DataDesignerInterface[DatasetCreationResults]):
             tool_configs=config_builder.tool_configs,
             client_concurrency_mode=client_concurrency_mode,
             request_admission=self._request_admission,
-            request_event_sink=self._open_telemetry if self._run_config.otel_metrics_port is not None else None,
-            scheduler_event_sink=self._open_telemetry if self._run_config.otel_metrics_port is not None else None,
+            request_event_sink=self._metrics_sink(),
+            scheduler_event_sink=self._metrics_sink(),
         )
+
+    def _metrics_sink(self) -> OpenTelemetryRuntime | None:
+        """Return the OpenTelemetry runtime as an event sink, or None when metrics are disabled."""
+        return self._open_telemetry if self._run_config.otel_metrics_port is not None else None
 
     def _create_request_admission_controller(self) -> AdaptiveRequestAdmissionController:
         from data_designer.engine.models.factory import create_request_admission_controller
 
         return create_request_admission_controller(
             self._run_config,
-            request_event_sink=self._open_telemetry if self._run_config.otel_metrics_port is not None else None,
+            request_event_sink=self._metrics_sink(),
         )
 
     def _get_interface_info(self, model_providers: list[ModelProvider]) -> InterfaceInfo:

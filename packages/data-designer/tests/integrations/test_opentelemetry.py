@@ -9,6 +9,7 @@ import re
 import socket
 import subprocess
 import sys
+import typing
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +17,7 @@ from threading import Barrier, Event
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.error import URLError
 from urllib.request import urlopen
+from wsgiref.simple_server import WSGIServer
 
 import pytest
 
@@ -27,6 +29,8 @@ from data_designer.config.run_config import RunConfig
 from data_designer.engine.models.clients.adapters.openai_compatible import OpenAICompatibleClient
 from data_designer.engine.models.request_admission.resources import RequestDomain, RequestResourceKey
 from data_designer.engine.observability import (
+    FilteringRequestAdmissionEventSink,
+    FilteringSchedulerAdmissionEventSink,
     RequestAdmissionEvent,
     RuntimeCorrelation,
     SchedulerAdmissionEvent,
@@ -72,6 +76,8 @@ def _active_request_total(runtime: OpenTelemetryRuntime) -> float:
 
 
 def test_runtime_only_accepts_exported_events_during_active_runs(runtime: OpenTelemetryRuntime) -> None:
+    assert isinstance(runtime, FilteringSchedulerAdmissionEventSink)
+    assert isinstance(runtime, FilteringRequestAdmissionEventSink)
     assert not runtime.accepts_scheduler_event("scheduler_job_started")
     assert not runtime.accepts_request_event("model_request_started")
 
@@ -994,3 +1000,10 @@ def test_concurrent_data_designer_creates_share_one_exporter(
     )
     assert generated_line.endswith(" 2.0")
     assert completed_line.endswith(" 2.0")
+
+
+def test_stdlib_server_annotation_resolves_at_runtime() -> None:
+    # STYLEGUIDE: stdlib imports stay at runtime, so get_type_hints can resolve WSGIServer.
+    hints = typing.get_type_hints(opentelemetry._stop_server)
+
+    assert hints["server"] == WSGIServer | None

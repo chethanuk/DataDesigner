@@ -12,7 +12,8 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING
+from wsgiref.simple_server import WSGIServer
 
 from data_designer.config.version import get_library_version
 from data_designer.engine.observability import (
@@ -23,6 +24,11 @@ from data_designer.engine.observability import (
     SchedulerAdmissionEventKind,
     runtime_correlation_provider,
 )
+
+if TYPE_CHECKING:
+    from opentelemetry.metrics import Counter, Histogram, ObservableGauge, UpDownCounter
+    from opentelemetry.sdk.metrics import MeterProvider
+    from prometheus_client import CollectorRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -84,18 +90,18 @@ class OpenTelemetryRuntime:
         self._active_request_attempts: dict[tuple[str, str], dict[str, str]] = {}
         self._initialized = False
         self._port: int | None = None
-        self._registry: Any = None
-        self._meter_provider: Any = None
-        self._server: Any = None
+        self._registry: CollectorRegistry | None = None
+        self._meter_provider: MeterProvider | None = None
+        self._server: WSGIServer | None = None
         self._server_thread: threading.Thread | None = None
-        self._start_http_server: Callable[..., Any] | None = None
-        self._create_duration: Any = None
-        self._dataset_records: Any = None
-        self._dataset_progress: Any = None
-        self._scheduler_events: Any = None
-        self._active_model_requests: Any = None
-        self._request_duration: Any = None
-        self._log_records: Any = None
+        self._start_http_server: Callable[..., tuple[WSGIServer, threading.Thread]] | None = None
+        self._create_duration: Histogram | None = None
+        self._dataset_records: Counter | None = None
+        self._dataset_progress: ObservableGauge | None = None
+        self._scheduler_events: Counter | None = None
+        self._active_model_requests: UpDownCounter | None = None
+        self._request_duration: Histogram | None = None
+        self._log_records: Counter | None = None
         self._log_handler: logging.Handler | None = None
 
     @property
@@ -155,17 +161,18 @@ class OpenTelemetryRuntime:
         if run_id is None:
             return
         with self._lock:
-            if run_id not in self._active_run_ids:
+            dataset_records, scheduler_events = self._dataset_records, self._scheduler_events
+            if run_id not in self._active_run_ids or dataset_records is None or scheduler_events is None:
                 return
             if event.event_kind == "row_group_checkpointed":
                 diagnostics = event.diagnostics
                 generated = _non_negative_int(diagnostics.get("surviving_rows"))
                 dropped = _non_negative_int(diagnostics.get("dropped_rows"))
-                self._dataset_records.add(
+                dataset_records.add(
                     generated,
                     {"record.result": "generated"},
                 )
-                self._dataset_records.add(
+                dataset_records.add(
                     dropped,
                     {"record.result": "dropped"},
                 )
@@ -188,7 +195,7 @@ class OpenTelemetryRuntime:
                 error_type = None
             if error_type is not None:
                 attributes["error.type"] = _bounded_attribute(error_type)
-            self._scheduler_events.add(1, attributes)
+            scheduler_events.add(1, attributes)
             if event.event_kind == "scheduler_job_completed":
                 self._finish_active_dataset(run_id)
 
@@ -213,19 +220,20 @@ class OpenTelemetryRuntime:
         attempt_id = event.request_attempt_id or event.request_lease_id
         attempt_key = (run_id, attempt_id) if isinstance(attempt_id, str) and attempt_id else None
         with self._lock:
-            if run_id not in self._active_run_ids:
+            active_model_requests, request_duration = self._active_model_requests, self._request_duration
+            if run_id not in self._active_run_ids or active_model_requests is None or request_duration is None:
                 return
             if event.event_kind == "model_request_started":
                 if attempt_key is not None:
                     if attempt_key not in self._active_request_attempts:
-                        self._active_model_requests.add(1, attributes)
+                        active_model_requests.add(1, attributes)
                         self._active_request_attempts[attempt_key] = dict(attributes)
                 return
 
             if attempt_key is not None:
                 active_attributes = self._active_request_attempts.get(attempt_key)
                 if active_attributes is not None:
-                    self._active_model_requests.add(-1, active_attributes)
+                    active_model_requests.add(-1, active_attributes)
                     self._active_request_attempts.pop(attempt_key, None)
             duration = event.diagnostics.get("duration_seconds")
             if not isinstance(duration, int | float) or duration < 0:
@@ -234,16 +242,17 @@ class OpenTelemetryRuntime:
             if outcome not in (None, "success"):
                 attributes = dict(attributes)
                 attributes["error.type"] = _bounded_attribute(outcome)
-            self._request_duration.record(float(duration), attributes)
+            request_duration.record(float(duration), attributes)
 
     def record_log(self, level: int) -> None:
         correlation = runtime_correlation_provider.current()
         if correlation is None:
             return
         with self._lock:
-            if correlation.run_id not in self._active_run_ids:
+            log_records = self._log_records
+            if correlation.run_id not in self._active_run_ids or log_records is None:
                 return
-            self._log_records.add(1, {"log.severity": _log_severity(level)})
+            log_records.add(1, {"log.severity": _log_severity(level)})
 
     def shutdown(self) -> None:
         with self._lock:
@@ -280,7 +289,7 @@ class OpenTelemetryRuntime:
                 provider.shutdown()
 
     def _activate_run(self, run_id: str, port: int) -> bool:
-        old_server: Any = None
+        old_server: WSGIServer | None = None
         old_thread: threading.Thread | None = None
         bound_url: str | None = None
         reused_url: str | None = None
@@ -322,7 +331,7 @@ class OpenTelemetryRuntime:
         from opentelemetry.sdk.resources import Resource
         from prometheus_client import CollectorRegistry, start_http_server
 
-        provider: Any = None
+        provider: MeterProvider | None = None
         handler: logging.Handler | None = None
         try:
             version = get_library_version()
@@ -406,7 +415,7 @@ class OpenTelemetryRuntime:
         self._log_handler = handler
         self._initialized = True
 
-    def _rebind(self, port: int) -> tuple[Any, threading.Thread | None]:
+    def _rebind(self, port: int) -> tuple[WSGIServer | None, threading.Thread | None]:
         if self._start_http_server is None:
             return None, None
         server, thread = self._start_http_server(port=port, addr=_HOST, registry=self._registry)
@@ -455,12 +464,15 @@ class OpenTelemetryRuntime:
     def _finish_active_requests(self, run_id: str) -> list[Exception]:
         failures = []
         with self._lock:
+            active_model_requests = self._active_model_requests
+            if active_model_requests is None:
+                return failures
             active = [
                 (key, attributes) for key, attributes in self._active_request_attempts.items() if key[0] == run_id
             ]
             for key, attributes in active:
                 try:
-                    self._active_model_requests.add(-1, attributes)
+                    active_model_requests.add(-1, attributes)
                 except Exception as exc:
                     failures.append(exc)
                 finally:
@@ -469,13 +481,16 @@ class OpenTelemetryRuntime:
 
     def _record_create_duration(self, duration: float, error_type: str | None = None) -> None:
         attributes = {"error.type": _bounded_attribute(error_type)} if error_type is not None else None
+        create_duration = self._create_duration
+        if create_duration is None:
+            return
         try:
-            self._create_duration.record(duration, attributes)
+            create_duration.record(duration, attributes)
         except Exception:
             logger.warning("Failed to record OpenTelemetry create duration.", exc_info=True)
 
 
-def _stop_server(server: Any, thread: threading.Thread | None) -> None:
+def _stop_server(server: WSGIServer | None, thread: threading.Thread | None) -> None:
     if server is None:
         return
     with contextlib.suppress(Exception):
