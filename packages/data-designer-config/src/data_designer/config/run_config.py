@@ -76,6 +76,24 @@ class RunConfig(ConfigBase):
         ge=1,
         description="Maximum number of row groups the async scheduler may keep active at once.",
     )
+    adaptive_row_group_admission: bool = Field(
+        default=False,
+        description=(
+            "If True, the async scheduler starts with adaptive_row_group_initial_target active row groups and "
+            "admits one more at a time, up to max_concurrent_row_groups, while the scheduler has spare task "
+            "capacity. Adaptive mode is also capped at min(num_records, max(3 * buffer_size, 8192)) active rows, "
+            "so a large buffer_size limits how far it ramps. If False, max_concurrent_row_groups is a fixed "
+            "row-group horizon."
+        ),
+    )
+    adaptive_row_group_initial_target: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Number of row groups an adaptive run may keep active at the start. Values above "
+            "max_concurrent_row_groups are capped to it. Ignored unless adaptive_row_group_admission is True."
+        ),
+    )
     max_in_flight_tasks: int = Field(
         default=1024,
         ge=1,
