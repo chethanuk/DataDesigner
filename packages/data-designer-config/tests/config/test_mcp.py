@@ -54,9 +54,14 @@ def test_tool_config_defaults() -> None:
     tool_config = ToolConfig(tool_alias="search", providers=["tools"])
     assert tool_config.allow_tools is None
     assert tool_config.max_tool_call_turns == 5
+    assert tool_config.unknown_tool_fallback is False
+    assert tool_config.unknown_tool_message is None
 
     with pytest.raises(ValidationError):
         ToolConfig(tool_alias="search", providers=["tools"], max_tool_call_turns=0)
+
+    with pytest.raises(ValidationError):
+        ToolConfig(tool_alias="search", providers=["tools"], unknown_tool_message="")
 
 
 def test_tool_config_with_options() -> None:
